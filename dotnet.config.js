@@ -4,7 +4,7 @@ module.exports = {
   CI: true,
 
   Advanced: {
-    target: "target.cs",
+    target: "index.cs",
     output: "Banana.dll",
     commit2: "main"
   }
