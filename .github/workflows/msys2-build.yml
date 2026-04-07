@@ -20,7 +20,7 @@ jobs:
         id: cfg
         run: |
           node -e "
-            const cfg = require('./config.js');
+            const cfg = require('./msys2.config.js');
 
             if (typeof cfg.commitEXE !== 'boolean') process.exit(1);
             if (typeof cfg.CI !== 'boolean') process.exit(1);
