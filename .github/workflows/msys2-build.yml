@@ -37,10 +37,16 @@ jobs:
           if (!cfg.Advanced.output) fail('Advanced.output missing');
           if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
 
+          if (!Array.isArray(cfg.Advanced.flags))
+            fail('Advanced.flags must be an array');
+
+          const flags = cfg.Advanced.flags.join(' ');
+
           const out =
             `target=${cfg.Advanced.target}\n` +
             `output=${cfg.Advanced.output}\n` +
             `commit2=${cfg.Advanced.commit2}\n` +
+            `flags=${flags}\n` +
             `commitEXE=${cfg.commitEXE}\n` +
             `CI=${cfg.CI}\n`;
 
@@ -50,11 +56,12 @@ jobs:
       - name: Debug config
         shell: bash
         run: |
-          echo "Target:  ${{ steps.cfg.outputs.target }}"
-          echo "Output:  ${{ steps.cfg.outputs.output }}"
-          echo "Commit2: ${{ steps.cfg.outputs.commit2 }}"
-          echo "commitEXE: ${{ steps.cfg.outputs.commitEXE }}"
-          echo "CI:        ${{ steps.cfg.outputs.CI }}"
+          echo "Target:     ${{ steps.cfg.outputs.target }}"
+          echo "Output:     ${{ steps.cfg.outputs.output }}"
+          echo "Commit2:    ${{ steps.cfg.outputs.commit2 }}"
+          echo "Flags:      ${{ steps.cfg.outputs.flags }}"
+          echo "commitEXE:  ${{ steps.cfg.outputs.commitEXE }}"
+          echo "CI:         ${{ steps.cfg.outputs.CI }}"
 
       - name: Install MSYS2
         uses: msys2/setup-msys2@v2
@@ -68,7 +75,9 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p build
-          g++ "${{ steps.cfg.outputs.target }}" -O2 -static -o "build/${{ steps.cfg.outputs.output }}"
+          g++ ${{ steps.cfg.outputs.flags }} \
+              "${{ steps.cfg.outputs.target }}" \
+              -o "build/${{ steps.cfg.outputs.output }}"
 
       - name: Commit EXE (config‑driven)
         if: >
