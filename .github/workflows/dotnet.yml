@@ -1,9 +1,12 @@
-name: Build .NET DLL
+name: Build and Decompile DLL
 
 on:
   push:
     branches:
       - "**"
+
+permissions:
+  contents: write
 
 jobs:
   build-dotnet:
@@ -12,6 +15,43 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate dotnet.config.js
+        run: |
+          if [ ! -f "dotnet.config.js" ]; then
+            echo "❌ Error 404: dotnet.config.js not found"
+            exit 1
+          fi
+
+          node - << 'EOF'
+          const fs = require("fs");
+
+          const raw = fs.readFileSync("dotnet.config.js", "utf8");
+          let cfg;
+          try {
+            cfg = require("./dotnet.config.js");
+          } catch (e) {
+            console.error("❌ Error 400: dotnet.config.js is invalid JS");
+            process.exit(1);
+          }
+
+          const required = ["commitDll", "commitCs", "CI"];
+          for (const key of required) {
+            if (!(key in cfg)) {
+              console.error(`❌ Error 400: Missing required config field: ${key}`);
+              process.exit(1);
+            }
+          }
+
+          if (!cfg.CI) {
+            console.error("❌ CI disabled by config");
+            process.exit(1);
+          }
+
+          console.log("✔ dotnet.config.js validated");
+          EOF
 
       - name: Validate index.cs
         run: |
@@ -24,8 +64,6 @@ jobs:
             echo "❌ Error 400: index.cs is empty"
             exit 1
           fi
-
-          echo "✔ index.cs found and non-empty"
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
@@ -41,8 +79,35 @@ jobs:
           dotnet build -c Release
           cp bin/Release/*/temp.dll ../index.dll
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: index-dll
-          path: index.dll
+      - name: Install ILSpy command-line decompiler
+        run: dotnet tool install --global ilspycmd
+
+      - name: Decompile DLL → dll.source.cs
+        run: |
+          ilspycmd index.dll -o dll.source.cs
+
+      - name: Conditional commit based on config
+        run: |
+          node - << 'EOF'
+          const cfg = require("./dotnet.config.js");
+          const fs = require("fs");
+
+          if (!cfg.commitDll && !cfg.commitCs) {
+            console.log("Config says: commit nothing. Skipping commit.");
+            process.exit(0);
+          }
+          EOF
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          if node -e "console.log(require('./dotnet.config.js').commitDll)"; then
+            git add index.dll || true
+          fi
+
+          if node -e "console.log(require('./dotnet.config.js').commitCs)"; then
+            git add dll.source.cs || true
+          fi
+
+          git commit -m "CI: update outputs from latest build" || echo "No changes to commit"
+          git push
