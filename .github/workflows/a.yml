@@ -5,6 +5,10 @@ on:
     branches:
       - "**"
 
+permissions:
+  contents: write
+
+
 jobs:
   build-dotnet:
     runs-on: ubuntu-latest
