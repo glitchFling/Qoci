@@ -103,3 +103,37 @@ jobs:
         with:
           name: exe
           path: build/${{ steps.cfg.outputs.output }}
+
+  sandbox:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: exe
+          path: exe
+
+      - name: Build sandbox image
+        run: |
+          cat > Dockerfile << 'EOF'
+          FROM ubuntu:22.04
+          RUN apt-get update && apt-get install -y wine && rm -rf /var/lib/apt/lists/*
+          WORKDIR /sandbox
+          COPY exe/ /sandbox/
+          # Drop all Linux capabilities
+          RUN setcap -r /usr/bin/wine
+          CMD ["wine", "Banana.exe"]
+          EOF
+
+          docker build -t dll-sandbox .
+
+      - name: Run EXE inside sandbox
+        run: |
+          docker run --rm \
+            --network none \
+            --cap-drop ALL \
+            --read-only \
+            -v $PWD/exe:/sandbox \
+            dll-sandbox
