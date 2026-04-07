@@ -24,10 +24,7 @@ jobs:
           const fs = require('fs');
           const cfg = require('./msys2.config.js');
 
-          function fail(msg) {
-            console.error('CONFIG ERROR:', msg);
-            process.exit(1);
-          }
+          function fail(msg) { console.error(msg); process.exit(1); }
 
           if (typeof cfg.commitEXE !== 'boolean') fail('commitEXE must be boolean');
           if (typeof cfg.CI !== 'boolean') fail('CI must be boolean');
@@ -36,9 +33,7 @@ jobs:
           if (!cfg.Advanced.target) fail('Advanced.target missing');
           if (!cfg.Advanced.output) fail('Advanced.output missing');
           if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
-
-          if (!Array.isArray(cfg.Advanced.flags))
-            fail('Advanced.flags must be an array');
+          if (!Array.isArray(cfg.Advanced.flags)) fail('Advanced.flags must be array');
 
           const flags = cfg.Advanced.flags.join(' ');
 
@@ -63,10 +58,26 @@ jobs:
           echo "commitEXE:  ${{ steps.cfg.outputs.commitEXE }}"
           echo "CI:         ${{ steps.cfg.outputs.CI }}"
 
+      - name: Locate MSVC via vswhere
+        id: msvc
+        shell: pwsh
+        run: |
+          $InstallPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          if (-not $InstallPath) {
+            Write-Error "MSVC not found"
+            exit 1
+          }
+
+          $VcVars = Join-Path $InstallPath "VC\Auxiliary\Build\vcvars64.bat"
+          echo "vcvars=$VcVars" >> $env:GITHUB_OUTPUT
+
       - name: Build with MSVC
         shell: cmd
         run: |
-          call "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "${{ steps.msvc.outputs.vcvars }}"
           if not exist build mkdir build
           cl ${{ steps.cfg.outputs.flags }} ${{ steps.cfg.outputs.target }} /Fe:build\${{ steps.cfg.outputs.output }}
 
