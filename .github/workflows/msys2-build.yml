@@ -18,24 +18,43 @@ jobs:
 
       - name: Load config.js
         id: cfg
+        shell: bash
         run: |
-          node -e "
-            const cfg = require('./msys2.config.js');
+          node << 'EOF'
+          const fs = require('fs');
+          const cfg = require('./config.js');
 
-            if (typeof cfg.commitEXE !== 'boolean') process.exit(1);
-            if (typeof cfg.CI !== 'boolean') process.exit(1);
+          function fail(msg) {
+            console.error('CONFIG ERROR:', msg);
+            process.exit(1);
+          }
 
-            if (!cfg.Advanced) process.exit(1);
-            if (!cfg.Advanced.target) process.exit(1);
-            if (!cfg.Advanced.output) process.exit(1);
-            if (!cfg.Advanced.commit2) process.exit(1);
+          if (typeof cfg.commitEXE !== 'boolean') fail('commitEXE must be boolean');
+          if (typeof cfg.CI !== 'boolean') fail('CI must be boolean');
 
-            console.log('commitEXE=' + cfg.commitEXE);
-            console.log('CI=' + cfg.CI);
-            console.log('target=' + cfg.Advanced.target);
-            console.log('output=' + cfg.Advanced.output);
-            console.log('commit2=' + cfg.Advanced.commit2);
-          " >> $GITHUB_OUTPUT
+          if (!cfg.Advanced) fail('Advanced missing');
+          if (!cfg.Advanced.target) fail('Advanced.target missing');
+          if (!cfg.Advanced.output) fail('Advanced.output missing');
+          if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
+
+          const out =
+            `target=${cfg.Advanced.target}\n` +
+            `output=${cfg.Advanced.output}\n` +
+            `commit2=${cfg.Advanced.commit2}\n` +
+            `commitEXE=${cfg.commitEXE}\n` +
+            `CI=${cfg.CI}\n`;
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
+          EOF
+
+      - name: Debug config
+        shell: bash
+        run: |
+          echo "Target:  ${{ steps.cfg.outputs.target }}"
+          echo "Output:  ${{ steps.cfg.outputs.output }}"
+          echo "Commit2: ${{ steps.cfg.outputs.commit2 }}"
+          echo "commitEXE: ${{ steps.cfg.outputs.commitEXE }}"
+          echo "CI:        ${{ steps.cfg.outputs.CI }}"
 
       - name: Install MSYS2
         uses: msys2/setup-msys2@v2
@@ -56,11 +75,12 @@ jobs:
           steps.cfg.outputs.CI == 'true' &&
           steps.cfg.outputs.commitEXE == 'true' &&
           github.ref_name == steps.cfg.outputs.commit2
+        shell: bash
         run: |
-          if [[ -n "$(git status --porcelain build/${{ steps.cfg.outputs.output }})" ]]; then
+          if [[ -n "$(git status --porcelain "build/${{ steps.cfg.outputs.output }}")" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add build/${{ steps.cfg.outputs.output }}
+            git add "build/${{ steps.cfg.outputs.output }}"
             git commit -m "chore: auto-update EXE [skip ci]"
             git push
           else
