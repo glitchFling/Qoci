@@ -29,20 +29,22 @@ jobs:
           fi
 
           node - << 'EOF'
-          const fs = require("fs");
+          const cfg = require("./dotnet.config.js");
 
-          let cfg;
-          try {
-            cfg = require("./dotnet.config.js");
-          } catch {
-            console.error("❌ Error 400: dotnet.config.js is invalid JS");
-            process.exit(1);
-          }
-
-          const required = ["commitDll", "commitCs", "CI"];
+          const required = ["commitDll", "commitCs", "CI", "Advanced"];
           for (const key of required) {
             if (!(key in cfg)) {
-              console.error(`❌ Error 400: Missing required config field: ${key}`);
+              console.error(`❌ Missing required config field: ${key}`);
+              process.exit(1);
+            }
+          }
+
+          const adv = cfg.Advanced;
+          const advRequired = ["target", "output", "commit2"];
+
+          for (const key of advRequired) {
+            if (!(key in adv)) {
+              console.error(`❌ Missing Advanced.${key}`);
               process.exit(1);
             }
           }
@@ -52,21 +54,31 @@ jobs:
             process.exit(1);
           }
 
+          if (!adv.target.endsWith(".cs")) {
+            console.error("❌ Advanced.target must be a .cs file");
+            process.exit(1);
+          }
+
+          if (!adv.output.endsWith(".dll")) {
+            console.error("❌ Advanced.output must be a .dll file");
+            process.exit(1);
+          }
+
           console.log("✔ dotnet.config.js validated");
           EOF
 
       # -------------------------------
       # SOURCE VALIDATION
       # -------------------------------
-      - name: Validate index.cs
+      - name: Validate target source file
         run: |
-          if [ ! -f "index.cs" ]; then
-            echo "❌ Error 404: index.cs not found"
+          TARGET=$(node -e "console.log(require('./dotnet.config.js').Advanced.target)")
+          if [ ! -f "$TARGET" ]; then
+            echo "❌ Error 404: $TARGET not found"
             exit 1
           fi
-
-          if [ ! -s "index.cs" ]; then
-            echo "❌ Error 400: index.cs is empty"
+          if [ ! -s "$TARGET" ]; then
+            echo "❌ Error 400: $TARGET is empty"
             exit 1
           fi
 
@@ -78,14 +90,17 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Compile index.cs → index.dll
+      - name: Compile target → output DLL
         run: |
+          TARGET=$(node -e "console.log(require('./dotnet.config.js').Advanced.target)")
+          OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
+
           dotnet new console -n temp --no-restore
           rm temp/Program.cs
-          mv index.cs temp/
+          mv "$TARGET" temp/
           cd temp
           dotnet build -c Release
-          cp bin/Release/*/temp.dll ../index.dll
+          cp bin/Release/*/temp.dll "../$OUTPUT"
 
       # -------------------------------
       # DECOMPILE
@@ -95,19 +110,30 @@ jobs:
 
       - name: Decompile DLL → dll.source.cs
         run: |
-          ilspycmd index.dll -o dll.source.cs
+          OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
+          ilspycmd "$OUTPUT" -o dll.source.cs
 
       # -------------------------------
       # CONDITIONAL COMMIT
       # -------------------------------
       - name: Conditional commit based on config
         run: |
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          TARGET_BRANCH=$(node -e "console.log(require('./dotnet.config.js').Advanced.commit2)")
+
+          if [ "$BRANCH" != "$TARGET_BRANCH" ]; then
+            echo "⏭ Skipping commit: branch mismatch ($BRANCH != $TARGET_BRANCH)"
+            exit 0
+          fi
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
+          OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
+
           # commit DLL only if commitDll === true
           node -e "process.exit(require('./dotnet.config.js').commitDll ? 0 : 1)" \
-            && git add index.dll
+            && git add "$OUTPUT"
 
           # commit decompiled source only if commitCs === true
           node -e "process.exit(require('./dotnet.config.js').commitCs ? 0 : 1)" \
