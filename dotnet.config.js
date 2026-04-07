@@ -1,5 +1,11 @@
 module.exports = {
   commitDll: true,
-  commitCs: false,
-  CI: true
+  commitCs: true,
+  CI: true,
+
+  Advanced: {
+    target: "target.cs",
+    output: "Banana.dll",
+    commit2: "main"
+  }
 };
