@@ -22,7 +22,7 @@ jobs:
         run: |
           node << 'EOF'
           const fs = require('fs');
-          const cfg = require('./config.js');
+          const cfg = require('./msys2.config.js');
 
           function fail(msg) {
             console.error('CONFIG ERROR:', msg);
