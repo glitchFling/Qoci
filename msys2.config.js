@@ -5,6 +5,7 @@ module.exports = {
   Advanced: {
     target: "index.cpp",
     output: "Banana.exe",
-    commit2: "main"
+    commit2: "main",
+    flags: ["-O2", "-static", "-s", "-flto"]
   }
 };
