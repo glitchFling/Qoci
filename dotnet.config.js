@@ -1,5 +1,5 @@
 module.exports = {
   commitDll: true,
-  commitCs: true,
+  commitCs: false,
   CI: false
 };
