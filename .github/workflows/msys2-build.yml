@@ -1,4 +1,4 @@
-name: MSYS2 C++ Build
+name: MSVC C++ Build (Config Driven)
 
 on:
   push:
@@ -63,23 +63,14 @@ jobs:
           echo "commitEXE:  ${{ steps.cfg.outputs.commitEXE }}"
           echo "CI:         ${{ steps.cfg.outputs.CI }}"
 
-      - name: Install MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          install: >
-            mingw-w64-x86_64-gcc
-          msystem: MINGW64
-
-      - name: Build EXE
-        shell: msys2 {0}
+      - name: Build with MSVC
+        shell: cmd
         run: |
-          mkdir -p build
-          g++ ${{ steps.cfg.outputs.flags }} \
-              "${{ steps.cfg.outputs.target }}" \
-              -o "build/${{ steps.cfg.outputs.output }}"
+          call "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          if not exist build mkdir build
+          cl ${{ steps.cfg.outputs.flags }} ${{ steps.cfg.outputs.target }} /Fe:build\${{ steps.cfg.outputs.output }}
 
-      - name: Commit EXE (config‑driven)
+      - name: Commit EXE (config-driven)
         if: >
           steps.cfg.outputs.CI == 'true' &&
           steps.cfg.outputs.commitEXE == 'true' &&
