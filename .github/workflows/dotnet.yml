@@ -39,7 +39,7 @@ jobs:
           mv index.cs temp/
           cd temp
           dotnet build -c Release
-          cp bin/Release/net8.0/temp.dll ../index.dll
+          cp bin/Release/*/temp.dll ../index.dll
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
