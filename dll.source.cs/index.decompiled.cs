@@ -11,7 +11,7 @@ using System.Runtime.Versioning;
 [assembly: AssemblyCompany("temp")]
 [assembly: AssemblyConfiguration("Release")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.0.0+489d8574f745a8fb16f69914ee274c285dba227b")]
+[assembly: AssemblyInformationalVersion("1.0.0+80924448e9b8bbf9f640b0bc577b326050bf3ed7")]
 [assembly: AssemblyProduct("temp")]
 [assembly: AssemblyTitle("temp")]
 [assembly: AssemblyVersion("1.0.0.0")]
