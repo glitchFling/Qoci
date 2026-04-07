@@ -1,28 +1,48 @@
-name: .NET CI
+name: Build .NET DLL
 
 on:
   push:
-    branches: [ "main" ] # Triggers whenever you push your hard work to main
-  pull_request:
-    branches: [ "main" ]
+    branches:
+      - "**"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest # Using a standard Linux runner
+  build-dotnet:
+    runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4 # Get your code out of the repo
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x # Setting the "School" version to .NET 8
+      - name: Validate index.cs
+        run: |
+          if [ ! -f "index.cs" ]; then
+            echo "❌ Error 404: index.cs not found"
+            exit 1
+          fi
 
-    - name: Restore dependencies
-      run: dotnet restore # Diligence: Ensuring all your tools are in order
+          if [ ! -s "index.cs" ]; then
+            echo "❌ Error 400: index.cs is empty"
+            exit 1
+          fi
 
-    - name: Build
-      run: dotnet build --no-restore # The big test: Does it actually work?
+          echo "✔ index.cs found and non-empty"
 
-    - name: Test
-      run: dotnet test --no-build --verbosity normal # Ensuring no "Wrath" broke the logic
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Compile index.cs → index.dll
+        run: |
+          dotnet new console -n temp --no-restore
+          rm temp/Program.cs
+          mv index.cs temp/
+          cd temp
+          dotnet build -c Release
+          cp bin/Release/net8.0/temp.dll ../index.dll
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-dll
+          path: index.dll
