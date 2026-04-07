@@ -1,0 +1,57 @@
+name: Build and Decompile DLL
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  build-dotnet:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate index.cs
+        run: |
+          if [ ! -f "index.cs" ]; then
+            echo "❌ Error 404: index.cs not found"
+            exit 1
+          fi
+
+          if [ ! -s "index.cs" ]; then
+            echo "❌ Error 400: index.cs is empty"
+            exit 1
+          fi
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Compile index.cs → index.dll
+        run: |
+          dotnet new console -n temp --no-restore
+          rm temp/Program.cs
+          mv index.cs temp/
+          cd temp
+          dotnet build -c Release
+          cp bin/Release/*/temp.dll ../index.dll
+
+      - name: Install ILSpy command-line decompiler
+        run: dotnet tool install --global ilspycmd
+
+      - name: Decompile DLL → dll.source.cs
+        run: |
+          ilspycmd index.dll -o dll.source.cs
+
+      - name: Commit dll.source.cs
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add dll.source.cs
+          git commit -m "CI: update dll.source.cs from latest build" || echo "No changes to commit"
+          git push
