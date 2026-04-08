@@ -26,7 +26,7 @@ jobs:
 
       - name: Compile
         run: |
-          g++ index.cpp -o index.exe
+         g++ index.cpp -o index.exe -mwindows
 
       - name: Run
         run: |
