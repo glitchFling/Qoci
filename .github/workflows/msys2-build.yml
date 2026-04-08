@@ -137,8 +137,9 @@ jobs:
       - name: Run EXE inside sandbox
         run: |
           docker run --rm \
-            --network none \
-            --cap-drop ALL \
-            --read-only \
-            -v $PWD/exe:/sandbox \
-            dll-sandbox
+          --network none \
+          --cap-drop ALL \
+          --read-only \
+          --tmpfs /tmp:rw,size=64m \
+          -v $PWD/exe:/sandbox \
+          dll-sandbox
