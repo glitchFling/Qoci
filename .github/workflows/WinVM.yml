@@ -10,17 +10,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Verify the file actually exists in the build folder
-      - name: Verify Build Path
-        run: ls -l build/Banana.exe
-
       - name: Create Dockerfile
         run: |
           cat <<EOF > Dockerfile
           FROM ubuntu:22.04
           RUN apt-get update && apt-get install -y wine64 xauth xvfb && rm -rf /var/lib/apt/lists/*
           WORKDIR /app
-          # Copy from the build folder into the container
           COPY build/Banana.exe .
           EOF
 
@@ -29,7 +24,8 @@ jobs:
 
       - name: Install x11docker
         run: |
-          curl -fsSL https://githubusercontent.com | sudo bash -s -- --update
+          # Use the full raw.githubusercontent.com URL
+          curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
 
       - name: Run GUI App with x11docker
         run: sudo x11docker --xvfb -- wine Banana.exe
