@@ -1,36 +1,15 @@
-name: x11docker CI
+name: Simple Windows Run
 
 on: [push]
 
 jobs:
-  run-windows-gui:
-    runs-on: ubuntu-latest
+  just-run-it:
+    runs-on: windows-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create Dockerfile
-        run: |
-          cat <<EOF > Dockerfile
-          FROM ubuntu:22.04
-          ENV DEBIAN_FRONTEND=noninteractive
-          RUN apt-get update && apt-get install -y wine64 xauth xvfb && rm -rf /var/lib/apt/lists/*
-          WORKDIR /app
-          COPY build/Banana.exe .
-          EOF
-
-      - name: Build Docker Image
-        run: docker build -t banana-wine .
-
-      - name: Download x11docker and Install Host Deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xinit xvfb xauth x11-xserver-utils
-          # FIXED URL: ://githubusercontent.com
-          curl -fsSL https://://githubusercontent.com/mviereck/x11docker/master/x11docker -o x11docker
-          chmod +x x11docker
-
-      - name: Run GUI App with x11docker
-        run: |
-          sudo timeout 1m ./x11docker --xvfb --network -- banana-wine wine Banana.exe
+      - name: Run Banana
+        # This runs it on a real Windows VM. No Wine, no Docker, no x11 nonsense.
+        run: .\build\Banana.exe
