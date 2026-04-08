@@ -24,7 +24,7 @@ jobs:
           node -e "
             const cfg = require('./anyfiles.config.js');
             console.log('Config:', cfg);
-            console.log('::set-output name=target::' + cfg.target);
+            require('fs').appendFileSync(process.env.GITHUB_OUTPUT, `target=${cfg.target}\n`);
           "
 
       - name: Find directory containing target
