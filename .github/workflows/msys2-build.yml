@@ -119,7 +119,12 @@ jobs:
         run: |
           cat > Dockerfile << 'EOF'
           FROM ubuntu:22.04
-          RUN apt-get update && apt-get install -y wine && rm -rf /var/lib/apt/lists/*
+
+          RUN dpkg --add-architecture i386 && \
+              apt-get update && \
+              apt-get install -y wine64 wine32 && \
+              rm -rf /var/lib/apt/lists/*
+
           WORKDIR /sandbox
           COPY exe/ /sandbox/
           CMD ["wine", "Banana.exe"]
