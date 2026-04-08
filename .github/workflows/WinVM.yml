@@ -1,51 +1,38 @@
-name: Run Banana.exe and Record (Windows)
+name: x11docker CI with Inline Dockerfile
 
-on:
-  workflow_dispatch:
+on: [push]
 
 jobs:
-  record:
-    runs-on: windows-latest
+  run-windows-gui:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download latest Banana.exe artifact
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          workflow: WinVM.yml
-          name: Banana.exe
-          path: build/Banana.exe
-          run_number: latest
-
-      - name: Install FFmpeg
-        shell: pwsh
+      # Creates the Dockerfile dynamically in the workspace
+      - name: Create Dockerfile
         run: |
-          Invoke-WebRequest -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
-          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
-          $ffmpegPath = Get-ChildItem ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1
-          echo "FFMPEG=$($ffmpegPath.FullName)" >> $env:GITHUB_ENV
+          cat <<EOF > Dockerfile
+          FROM ubuntu:22.04
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y \
+              wine64 \
+              xauth \
+              xvfb \
+              && rm -rf /var/lib/apt/lists/*
+          WORKDIR /app
+          # Ensure Banana.exe is in your repo's root directory
+          COPY Banana.exe .
+          EOF
 
-      - name: Start screen recording
-        shell: pwsh
+      - name: Build Docker Image
+        run: docker build -t banana-wine .
+
+      - name: Install x11docker
         run: |
-          Start-Process -FilePath "${env:FFMPEG}" `
-            -ArgumentList "-y -f gdigrab -framerate 30 -i desktop recording.mp4" `
-            -WindowStyle Hidden
+          curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
 
-      - name: Run Banana.exe
-        shell: pwsh
-        run: |
-          Start-Process -FilePath "exe\\Banana.exe" -Wait
-
-      - name: Stop recording
-        shell: pwsh
-        run: |
-          Get-Process ffmpeg -ErrorAction SilentlyContinue | Stop-Process -Force
-
-      - name: Upload recording
-        uses: actions/upload-artifact@v4
-        with:
-          name: banana-video
-          path: recording.mp4
+      - name: Run GUI App with x11docker
+        # --xvfb creates a virtual display to allow the GUI to run headlessly
+        run: sudo x11docker --xvfb -- wine Banana.exe
