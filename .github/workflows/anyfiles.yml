@@ -19,11 +19,26 @@ jobs:
           node-version: 20
 
       - name: Load config
+        id: cfg
         run: |
-          echo "Loading config..."
-          node -e "console.log(require('./anyfiles.config.js'))"
+          node -e "
+            const cfg = require('./anyfiles.config.js');
+            console.log('Config:', cfg);
+            console.log('::set-output name=target::' + cfg.target);
+          "
 
-      - name: Scan entire repo
+      - name: Find directory containing target
         run: |
-          echo "Scanning all files..."
-          find . -type f
+          TARGET="${{ steps.cfg.outputs.target }}"
+          echo "Searching for: $TARGET"
+
+          FILE_PATH=$(find . -type f -name "$TARGET" | head -n 1)
+
+          if [ -z "$FILE_PATH" ]; then
+            echo "Target not found in repo"
+            exit 1
+          fi
+
+          DIR_PATH=$(dirname "$FILE_PATH")
+          echo "Directory containing target:"
+          echo "$DIR_PATH"
