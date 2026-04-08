@@ -6,6 +6,6 @@ module.exports = {
     target: "index.cpp",
     output: "Banana.exe",
     commit2: "main",
-    flags: ["/O2", "/MT", "/GL", "user32.lib", "/link", "/SUBSYSTEM:WINDOWS"]
+    flags: ["index.cpp", "/Fe:build\Banana.exe", "/O2", "/MT", "/GL", "/link", "/LTCG", "/SUBSYSTEM:WINDOWS", "user32.lib"]
   }
 };
