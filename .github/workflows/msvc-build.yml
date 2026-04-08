@@ -22,7 +22,7 @@ jobs:
         run: |
           node << 'EOF'
           const fs = require('fs');
-          const cfg = require('./msys2.config.js');
+          const cfg = require('./msvc.config.js');
 
           function fail(msg) { console.error(msg); process.exit(1); }
 
