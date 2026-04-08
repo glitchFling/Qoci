@@ -1,0 +1,29 @@
+name: AnyFiles?
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Load config
+        run: |
+          echo "Loading config..."
+          node -e "console.log(require('./anyfiles.config.js'))"
+
+      - name: Scan entire repo
+        run: |
+          echo "Scanning all files..."
+          find . -type f
