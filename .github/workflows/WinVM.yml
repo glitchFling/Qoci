@@ -1,4 +1,4 @@
-name: Run EXE and Record (Windows)
+name: Run Banana.exe and Record (Windows)
 
 on:
   workflow_dispatch:
@@ -11,11 +11,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download EXE artifact
-        uses: actions/download-artifact@v4
+      - name: Download latest Banana.exe artifact
+        uses: dawidd6/action-download-artifact@v3
         with:
+          workflow: build.yml
           name: exe
           path: exe
+          run_number: latest
 
       - name: Install FFmpeg
         shell: pwsh
@@ -32,7 +34,7 @@ jobs:
             -ArgumentList "-y -f gdigrab -framerate 30 -i desktop recording.mp4" `
             -WindowStyle Hidden
 
-      - name: Run EXE
+      - name: Run Banana.exe
         shell: pwsh
         run: |
           Start-Process -FilePath "exe\\Banana.exe" -Wait
@@ -45,5 +47,5 @@ jobs:
       - name: Upload recording
         uses: actions/upload-artifact@v4
         with:
-          name: exe-video
+          name: banana-video
           path: recording.mp4
