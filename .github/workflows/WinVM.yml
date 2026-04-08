@@ -10,9 +10,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # DEBUG: This lists files to confirm Banana.exe is where you think it is
-      - name: List files in workspace
-        run: ls -R
+      # Verify the file actually exists in the build folder
+      - name: Verify Build Path
+        run: ls -l build/Banana.exe
 
       - name: Create Dockerfile
         run: |
@@ -20,8 +20,8 @@ jobs:
           FROM ubuntu:22.04
           RUN apt-get update && apt-get install -y wine64 xauth xvfb && rm -rf /var/lib/apt/lists/*
           WORKDIR /app
-          # This line fails if Banana.exe isn't in the root folder
-          COPY Banana.exe .
+          # Copy from the build folder into the container
+          COPY build/Banana.exe .
           EOF
 
       - name: Build Docker Image
