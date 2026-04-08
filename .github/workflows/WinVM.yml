@@ -17,7 +17,6 @@ jobs:
           ENV DEBIAN_FRONTEND=noninteractive
           RUN apt-get update && apt-get install -y wine64 xauth xvfb && rm -rf /var/lib/apt/lists/*
           WORKDIR /app
-          # Ensure build/Banana.exe is in your repo
           COPY build/Banana.exe .
           EOF
 
@@ -27,14 +26,11 @@ jobs:
       - name: Download x11docker and Install Host Deps
         run: |
           sudo apt-get update
-          # x11-xserver-utils provides 'cvt' and 'xdpyinfo'
           sudo apt-get install -y xinit xvfb xauth x11-xserver-utils
-          curl -fsSL https://githubusercontent.com -o x11docker
+          # FIXED URL: ://githubusercontent.com
+          curl -fsSL https://://githubusercontent.com/mviereck/x11docker/master/x11docker -o x11docker
           chmod +x x11docker
 
       - name: Run GUI App with x11docker
         run: |
-          # Syntax: x11docker [OPTIONS] IMAGE [COMMAND]
-          # --xvfb creates the virtual screen
-          # --network allows internet if Banana.exe needs it
           sudo timeout 1m ./x11docker --xvfb --network -- banana-wine wine Banana.exe
