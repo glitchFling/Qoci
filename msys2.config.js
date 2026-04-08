@@ -6,6 +6,6 @@ module.exports = {
     target: "index.cpp",
     output: "Banana.exe",
     commit2: "main",
-    flags: ["-O2", "-static", "-s", "-flto", "-mwindows"] // Added -mwindows for GUI
+    flags: ["/O2", "/MT", "/GL", "user32.lib", "/link", "/SUBSYSTEM:WINDOWS"]
   }
 };
