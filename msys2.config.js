@@ -1,6 +1,6 @@
 module.exports = {
   commitEXE: true,
-  CI: true,
+  CI: false,
 
   Advanced: {
     target: "index.cpp",
