@@ -22,10 +22,16 @@ jobs:
       - name: Build Docker Image
         run: docker build -t banana-wine .
 
-      - name: Install x11docker
+      - name: Install x11docker and X11 dependencies
         run: |
-          # Use the full raw.githubusercontent.com URL
-          curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
+          # Install X11 server tools on the host runner
+          sudo apt-get update
+          sudo apt-get install -y xinit xvfb xauth
+          # Install x11docker script
+          curl -fsSL https://githubusercontent.com | sudo bash -s -- --update
 
       - name: Run GUI App with x11docker
-        run: sudo x11docker --xvfb -- wine Banana.exe
+        run: |
+          # Use sudo -E to preserve environment variables if needed
+          sudo x11docker --xvfb -- wine Banana.exe
+
