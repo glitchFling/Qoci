@@ -1,37 +1,54 @@
-name: x11docker CI
+name: x11docker CI with Inline Dockerfile
 
 on: [push]
 
 jobs:
   run-windows-gui:
+    # We use Ubuntu because x11docker + Wine is more reliable for headless 
+    # Windows GUI execution than a standard Windows runner.
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Verify the file is in the build folder before starting
+      - name: Verify build artifact
+        run: |
+          if [ ! -f build/Banana.exe ]; then
+            echo "Error: build/Banana.exe not found!"
+            exit 1
+          fi
+
       - name: Create Dockerfile
         run: |
           cat <<EOF > Dockerfile
           FROM ubuntu:22.04
-          RUN apt-get update && apt-get install -y wine64 xauth xvfb && rm -rf /var/lib/apt/lists/*
+          ENV DEBIAN_FRONTEND=noninteractive
+          # Install Wine and display dependencies inside the container
+          RUN apt-get update && apt-get install -y \
+              wine64 \
+              xauth \
+              xvfb \
+              && rm -rf /var/lib/apt/lists/*
           WORKDIR /app
+          # Copy the exe from your local build folder into the container
           COPY build/Banana.exe .
           EOF
 
       - name: Build Docker Image
         run: docker build -t banana-wine .
 
-      - name: Install x11docker and X11 dependencies
+      - name: Install x11docker and Host Dependencies
         run: |
-          # Install X11 server tools on the host runner
+          # Install X11 tools on the host runner so x11docker can manage displays
           sudo apt-get update
           sudo apt-get install -y xinit xvfb xauth
-          # Install x11docker script
+          # Correct raw URL for x11docker script
           curl -fsSL https://githubusercontent.com | sudo bash -s -- --update
 
       - name: Run GUI App with x11docker
         run: |
-          # Use sudo -E to preserve environment variables if needed
-          sudo x11docker --xvfb -- wine Banana.exe
-
+          # Use absolute path and --xvfb to provide a headless virtual screen
+          # Use sudo -E to preserve the runner environment
+          sudo -E /usr/local/bin/x11docker --xvfb -- wine Banana.exe
