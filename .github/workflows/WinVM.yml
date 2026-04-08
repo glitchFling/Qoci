@@ -14,9 +14,9 @@ jobs:
       - name: Download latest Banana.exe artifact
         uses: dawidd6/action-download-artifact@v3
         with:
-          workflow: build.yml
-          name: exe
-          path: exe
+          workflow: WinVM.yml
+          name: Banana.exe
+          path: build/Banana.exe
           run_number: latest
 
       - name: Install FFmpeg
