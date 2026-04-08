@@ -1,0 +1,49 @@
+name: Run EXE and Record (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  record:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: exe
+          path: exe
+
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          $ffmpegPath = Get-ChildItem ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          echo "FFMPEG=$($ffmpegPath.FullName)" >> $env:GITHUB_ENV
+
+      - name: Start screen recording
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "${env:FFMPEG}" `
+            -ArgumentList "-y -f gdigrab -framerate 30 -i desktop recording.mp4" `
+            -WindowStyle Hidden
+
+      - name: Run EXE
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "exe\\Banana.exe" -Wait
+
+      - name: Stop recording
+        shell: pwsh
+        run: |
+          Get-Process ffmpeg -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Upload recording
+        uses: actions/upload-artifact@v4
+        with:
+          name: exe-video
+          path: recording.mp4
