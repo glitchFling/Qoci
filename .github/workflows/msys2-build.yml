@@ -88,7 +88,7 @@ jobs:
           github.ref_name == steps.cfg.outputs.commit2
         shell: bash
         run: |
-          if [[ -n "$(git status --porcelain "build/${{ steps.cfg.outputs.output }}")" ]]; then
+          if [[ -n "$(git.status --porcelain "build/${{ steps.cfg.outputs.output }}")" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add "build/${{ steps.cfg.outputs.output }}"
@@ -124,6 +124,8 @@ jobs:
               apt-get update && \
               apt-get install -y wine64 wine32 && \
               rm -rf /var/lib/apt/lists/*
+
+          RUN wineboot --init
 
           WORKDIR /sandbox
           COPY exe/ /sandbox/
