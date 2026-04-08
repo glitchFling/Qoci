@@ -122,8 +122,6 @@ jobs:
           RUN apt-get update && apt-get install -y wine && rm -rf /var/lib/apt/lists/*
           WORKDIR /sandbox
           COPY exe/ /sandbox/
-          # Drop all Linux capabilities
-          RUN setcap -r /usr/bin/wine
           CMD ["wine", "Banana.exe"]
           EOF
 
