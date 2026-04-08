@@ -1,6 +1,6 @@
-#include <iostream>
+#include <windows.h>
 
-int main() {
-    std::cout << "Banana.exe built via MSYS2 CI" << std::endl;
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    MessageBox(NULL, "GUI made with me", "Banana App", MB_OK | MB_ICONINFORMATION);
     return 0;
 }
