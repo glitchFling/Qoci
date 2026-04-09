@@ -30,32 +30,32 @@ jobs:
           node << 'EOF'
           const fs = require('fs');
           const path = require('path');
-
-          const dir = process.env.DIR;
+      
+          const dir = process.env.DIR; // <-- AnyFiles directory
           const configPath = path.join(dir, "msvc.config.js");
-
+      
           console.log("Loading config from:", configPath);
-
+      
           if (!fs.existsSync(configPath)) {
             console.error("Config file not found:", configPath);
             process.exit(1);
           }
-
+      
           const cfg = require(configPath);
-
+      
           function fail(msg) { console.error(msg); process.exit(1); }
-
+      
           if (typeof cfg.commitEXE !== 'boolean') fail('commitEXE must be boolean');
           if (typeof cfg.CI !== 'boolean') fail('CI must be boolean');
-
+      
           if (!cfg.Advanced) fail('Advanced missing');
           if (!cfg.Advanced.target) fail('Advanced.target missing');
           if (!cfg.Advanced.output) fail('Advanced.output missing');
           if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
           if (!Array.isArray(cfg.Advanced.flags)) fail('Advanced.flags must be array');
-
+      
           const flags = cfg.Advanced.flags.join(' ');
-
+      
           const out =
             `target=${cfg.Advanced.target}\n` +
             `output=${cfg.Advanced.output}\n` +
@@ -63,11 +63,12 @@ jobs:
             `flags=${flags}\n` +
             `commitEXE=${cfg.commitEXE}\n` +
             `CI=${cfg.CI}\n`;
-
+      
           fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
           EOF
         env:
           DIR: ${{ needs.locate.outputs.directory }}
+
 
       # Debug config + AnyFiles directory
       - name: Debug config
