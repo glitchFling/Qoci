@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------------
+      # CHECKOUT
+      # -------------------------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -24,7 +27,7 @@ jobs:
       - name: Validate dotnet.config.js
         run: |
           if [ ! -f "dotnet.config.js" ]; then
-            echo "❌ Error 404: dotnet.config.js not found"
+            echo "❌ dotnet.config.js not found"
             exit 1
           fi
 
@@ -41,7 +44,6 @@ jobs:
 
           const adv = cfg.Advanced;
           const advRequired = ["target", "output", "commit2"];
-
           for (const key of advRequired) {
             if (!(key in adv)) {
               console.error(`❌ Missing Advanced.${key}`);
@@ -74,11 +76,11 @@ jobs:
         run: |
           TARGET=$(node -e "console.log(require('./dotnet.config.js').Advanced.target)")
           if [ ! -f "$TARGET" ]; then
-            echo "❌ Error 404: $TARGET not found"
+            echo "❌ $TARGET not found"
             exit 1
           fi
           if [ ! -s "$TARGET" ]; then
-            echo "❌ Error 400: $TARGET is empty"
+            echo "❌ $TARGET is empty"
             exit 1
           fi
 
@@ -90,33 +92,41 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Compile target → output DLL
+      - name: Build DLL
         run: |
           TARGET=$(node -e "console.log(require('./dotnet.config.js').Advanced.target)")
           OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
 
+          mkdir build
+          cp "$TARGET" build/Program.cs
+
           dotnet new console -n temp --no-restore
           rm temp/Program.cs
-          mv "$TARGET" temp/
-          cd temp
-          dotnet build -c Release
-          cp bin/Release/*/temp.dll "../$OUTPUT"
+          mv build/Program.cs temp/
+
+          dotnet build temp -c Release
+
+          DLL_PATH=$(find temp/bin/Release -name "temp.dll" | head -n 1)
+          cp "$DLL_PATH" "$OUTPUT"
+
+          echo "✔ Built DLL → $OUTPUT"
 
       # -------------------------------
       # DECOMPILE
       # -------------------------------
-      - name: Install ILSpy command-line decompiler
+      - name: Install ILSpy
         run: dotnet tool install --global ilspycmd
 
-      - name: Decompile DLL → dll.source.cs
+      - name: Decompile DLL
         run: |
           OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
           ilspycmd "$OUTPUT" -o dll.source.cs
+          echo "✔ Decompiled → dll.source.cs"
 
       # -------------------------------
       # CONDITIONAL COMMIT
       # -------------------------------
-      - name: Conditional commit based on config
+      - name: Conditional commit
         run: |
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
           TARGET_BRANCH=$(node -e "console.log(require('./dotnet.config.js').Advanced.commit2)")
@@ -131,13 +141,15 @@ jobs:
 
           OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
 
-          # commit DLL only if commitDll === true
-          node -e "process.exit(require('./dotnet.config.js').commitDll ? 0 : 1)" \
-            && git add "$OUTPUT"
+          # Add DLL if enabled
+          if node -e "process.exit(require('./dotnet.config.js').commitDll ? 0 : 1)"; then
+            git add "$OUTPUT"
+          fi
 
-          # commit decompiled source only if commitCs === true
-          node -e "process.exit(require('./dotnet.config.js').commitCs ? 0 : 1)" \
-            && git add dll.source.cs
+          # Add decompiled source if enabled
+          if node -e "process.exit(require('./dotnet.config.js').commitCs ? 0 : 1)"; then
+            git add dll.source.cs
+          fi
 
           git commit -m "CI: update outputs from latest build" || echo "No changes to commit"
           git push
