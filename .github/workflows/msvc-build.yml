@@ -15,7 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1. Locate msvc.config.js anywhere in repo
+      # 1. Locate msvc.config.js anywhere in the repo
       - name: Locate msvc.config.js
         id: locate_cfg
         shell: bash
@@ -41,7 +41,7 @@ jobs:
 
           echo "config_path=$CONFIG_PATH" >> $GITHUB_OUTPUT
 
-      # 2. Load config
+      # 2. Load config and split compiler/linker flags
       - name: Load config.js
         id: cfg
         shell: bash
@@ -57,22 +57,20 @@ jobs:
 
           function fail(msg) { console.error(msg); process.exit(1); }
 
-          if (typeof cfg.commitEXE !== 'boolean') fail('commitEXE must be boolean');
-          if (typeof cfg.CI !== 'boolean') fail('CI must be boolean');
+          if (!cfg.Advanced) fail("Advanced missing");
+          if (!cfg.Advanced.target) fail("Advanced.target missing");
+          if (!cfg.Advanced.output) fail("Advanced.output missing");
+          if (!cfg.Advanced.commit2) fail("Advanced.commit2 missing");
 
-          if (!cfg.Advanced) fail('Advanced missing');
-          if (!cfg.Advanced.target) fail('Advanced.target missing');
-          if (!cfg.Advanced.output) fail('Advanced.output missing');
-          if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
-          if (!Array.isArray(cfg.Advanced.flags)) fail('Advanced.flags must be array');
-
-          const flags = cfg.Advanced.flags.join(' ');
+          const compilerFlags = cfg.Advanced.flags || [];
+          const linkerFlags = cfg.Advanced.linkflags || [];
 
           const out =
             `target=${cfg.Advanced.target}\n` +
             `output=${cfg.Advanced.output}\n` +
             `commit2=${cfg.Advanced.commit2}\n` +
-            `flags=${flags}\n` +
+            `compiler=${compilerFlags.join(" ")}\n` +
+            `linker=${linkerFlags.join(" ")}\n` +
             `commitEXE=${cfg.commitEXE}\n` +
             `CI=${cfg.CI}\n`;
 
@@ -96,10 +94,7 @@ jobs:
             exit 1
           fi
 
-          DIR_PATH=$(dirname "$FILE_PATH")
-
           echo "Found at: $FILE_PATH"
-          echo "directory=$DIR_PATH" >> $GITHUB_OUTPUT
           echo "filepath=$FILE_PATH" >> $GITHUB_OUTPUT
 
       # 4. Locate MSVC
@@ -119,13 +114,13 @@ jobs:
           $VcVars = Join-Path $InstallPath "VC\Auxiliary\Build\vcvars64.bat"
           echo "vcvars=$VcVars" >> $env:GITHUB_OUTPUT
 
-      # 5. Build with MSVC
+      # 5. Build with MSVC (correct flag order)
       - name: Build with MSVC
         shell: cmd
         run: |
           call "${{ steps.msvc.outputs.vcvars }}"
           if not exist build mkdir build
-          cl ${{ steps.cfg.outputs.flags }} "${{ steps.locate_src.outputs.filepath }}" /Fe:build\${{ steps.cfg.outputs.output }}
+          cl ${{ steps.cfg.outputs.compiler }} "${{ steps.locate_src.outputs.filepath }}" /Fe:build\${{ steps.cfg.outputs.output }} /link ${{ steps.cfg.outputs.linker }}
 
       # 6. Commit EXE if config allows
       - name: Commit EXE (config-driven)
