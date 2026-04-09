@@ -32,7 +32,7 @@ jobs:
           const path = require('path');
       
           const dir = process.env.DIR; // <-- AnyFiles directory
-          const configPath = path.join(dir, "msvc.config.js");
+          const configPath = path.join(${{ needs.locate.outputs.directory }}, "msvc.config.js");
       
           console.log("Loading config from:", configPath);
       
