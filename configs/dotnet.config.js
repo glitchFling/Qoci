@@ -1,7 +1,7 @@
 module.exports = {
   commitDll: true,
   commitCs: true,
-  CI: false,
+  CI: true,
 
   Advanced: {
     target: "index.cs",
