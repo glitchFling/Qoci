@@ -12,6 +12,10 @@ jobs:
   build-dotnet:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
     steps:
       # -------------------------------
       # CHECKOUT
@@ -26,8 +30,10 @@ jobs:
       # -------------------------------
       - name: Validate dotnet.config.js
         run: |
-          if [ ! -f "dotnet.config.js" ]; then
-            echo "❌ dotnet.config.js not found"
+          if [ ! -f "./dotnet.config.js" ]; then
+            echo "❌ dotnet.config.js not found in repo root"
+            echo "pwd = $(pwd)"
+            ls -a
             exit 1
           fi
 
@@ -75,12 +81,14 @@ jobs:
       - name: Validate target source file
         run: |
           TARGET=$(node -e "console.log(require('./dotnet.config.js').Advanced.target)")
-          if [ ! -f "$TARGET" ]; then
-            echo "❌ $TARGET not found"
+
+          if [ ! -f "./$TARGET" ]; then
+            echo "❌ Target source file not found: $TARGET"
             exit 1
           fi
-          if [ ! -s "$TARGET" ]; then
-            echo "❌ $TARGET is empty"
+
+          if [ ! -s "./$TARGET" ]; then
+            echo "❌ Target source file is empty: $TARGET"
             exit 1
           fi
 
@@ -97,17 +105,20 @@ jobs:
           TARGET=$(node -e "console.log(require('./dotnet.config.js').Advanced.target)")
           OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
 
-          mkdir build
-          cp "$TARGET" build/Program.cs
+          rm -rf temp build
+          mkdir build temp
 
-          dotnet new console -n temp --no-restore
+          cp "./$TARGET" build/Program.cs
+          cp build/Program.cs temp/Program.cs
+
+          dotnet new console -n temp --force --no-restore
           rm temp/Program.cs
           mv build/Program.cs temp/
 
           dotnet build temp -c Release
 
           DLL_PATH=$(find temp/bin/Release -name "temp.dll" | head -n 1)
-          cp "$DLL_PATH" "$OUTPUT"
+          cp "$DLL_PATH" "./$OUTPUT"
 
           echo "✔ Built DLL → $OUTPUT"
 
@@ -120,7 +131,7 @@ jobs:
       - name: Decompile DLL
         run: |
           OUTPUT=$(node -e "console.log(require('./dotnet.config.js').Advanced.output)")
-          ilspycmd "$OUTPUT" -o dll.source.cs
+          ilspycmd "./$OUTPUT" -o "./dll.source.cs"
           echo "✔ Decompiled → dll.source.cs"
 
       # -------------------------------
@@ -143,12 +154,12 @@ jobs:
 
           # Add DLL if enabled
           if node -e "process.exit(require('./dotnet.config.js').commitDll ? 0 : 1)"; then
-            git add "$OUTPUT"
+            git add "./$OUTPUT"
           fi
 
           # Add decompiled source if enabled
           if node -e "process.exit(require('./dotnet.config.js').commitCs ? 0 : 1)"; then
-            git add dll.source.cs
+            git add "./dll.source.cs"
           fi
 
           git commit -m "CI: update outputs from latest build" || echo "No changes to commit"
