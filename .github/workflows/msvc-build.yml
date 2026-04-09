@@ -8,13 +8,21 @@ permissions:
   contents: write
 
 jobs:
+  # 1. Locate target file using AnyFiles
+  locate:
+    uses: ./.github/workflows/anyfiles.yml
+
+  # 2. Build only if the target file exists
   build:
+    needs: locate
+    if: needs.locate.outputs.exists == 'true'
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Load msvc.config.js
       - name: Load config.js
         id: cfg
         shell: bash
@@ -47,6 +55,7 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
           EOF
 
+      # Debug config + AnyFiles directory
       - name: Debug config
         shell: bash
         run: |
@@ -56,7 +65,9 @@ jobs:
           echo "Flags:      ${{ steps.cfg.outputs.flags }}"
           echo "commitEXE:  ${{ steps.cfg.outputs.commitEXE }}"
           echo "CI:         ${{ steps.cfg.outputs.CI }}"
+          echo "Directory from AnyFiles: ${{ needs.locate.outputs.directory }}"
 
+      # Locate MSVC
       - name: Locate MSVC via vswhere
         id: msvc
         shell: pwsh
@@ -73,13 +84,15 @@ jobs:
           $VcVars = Join-Path $InstallPath "VC\Auxiliary\Build\vcvars64.bat"
           echo "vcvars=$VcVars" >> $env:GITHUB_OUTPUT
 
+      # Build using directory from AnyFiles
       - name: Build with MSVC
         shell: cmd
         run: |
           call "${{ steps.msvc.outputs.vcvars }}"
           if not exist build mkdir build
-          cl ${{ steps.cfg.outputs.flags }} ${{ steps.cfg.outputs.target }} /Fe:build\${{ steps.cfg.outputs.output }}
+          cl ${{ steps.cfg.outputs.flags }} "${{ needs.locate.outputs.directory }}\\${{ steps.cfg.outputs.target }}" /Fe:build\${{ steps.cfg.outputs.output }}
 
+      # Commit EXE if config allows
       - name: Commit EXE (config-driven)
         if: >
           steps.cfg.outputs.CI == 'true' &&
@@ -87,7 +100,7 @@ jobs:
           github.ref_name == steps.cfg.outputs.commit2
         shell: bash
         run: |
-          if [[ -n "$(git.status --porcelain "build/${{ steps.cfg.outputs.output }}")" ]]; then
+          if [[ -n "$(git status --porcelain "build/${{ steps.cfg.outputs.output }}")" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add "build/${{ steps.cfg.outputs.output }}"
@@ -97,6 +110,7 @@ jobs:
             echo "No EXE changes."
           fi
 
+      # Upload artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
