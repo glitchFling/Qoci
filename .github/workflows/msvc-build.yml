@@ -1,4 +1,4 @@
-name: MSVC C++ Build (Config Driven)
+name: MSVC C++ Build (Standalone)
 
 on:
   push:
@@ -8,63 +8,101 @@ permissions:
   contents: write
 
 jobs:
-  # 1. Locate target file using AnyFiles
-  locate:
-    uses: ./.github/workflows/anyfiles.yml
-
-  # 2. Build only if the target file exists
   build:
-    needs: locate
-    if: needs.locate.outputs.exists == 'true'
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Load msvc.config.js from the directory AnyFiles found
-      - name: Locate msvc.config.js anywhere in repo
-        id: locate_msvc_cfg
+      # 1. Locate msvc.config.js anywhere in repo
+      - name: Locate msvc.config.js
+        id: locate_cfg
         shell: bash
         run: |
-          echo "Searching for msvc.config.js in entire repo..."
-      
+          echo "Searching for msvc.config.js..."
+
           CONFIGS=$(find . -type f -name "msvc.config.js")
-      
           COUNT=$(echo "$CONFIGS" | wc -l)
-      
+
           if [ "$COUNT" -eq 0 ]; then
             echo "❌ No msvc.config.js found"
             exit 1
           fi
-      
+
           if [ "$COUNT" -gt 1 ]; then
             echo "❌ Multiple msvc.config.js files found:"
             echo "$CONFIGS"
             exit 1
           fi
-      
+
           CONFIG_PATH=$(echo "$CONFIGS")
           echo "Found config at: $CONFIG_PATH"
-      
+
           echo "config_path=$CONFIG_PATH" >> $GITHUB_OUTPUT
 
-
-
-
-      # Debug config + AnyFiles directory
-      - name: Debug config
+      # 2. Load config
+      - name: Load config.js
+        id: cfg
         shell: bash
         run: |
-          echo "Target:     ${{ steps.cfg.outputs.target }}"
-          echo "Output:     ${{ steps.cfg.outputs.output }}"
-          echo "Commit2:    ${{ steps.cfg.outputs.commit2 }}"
-          echo "Flags:      ${{ steps.cfg.outputs.flags }}"
-          echo "commitEXE:  ${{ steps.cfg.outputs.commitEXE }}"
-          echo "CI:         ${{ steps.cfg.outputs.CI }}"
-          echo "Directory from AnyFiles: ${{ needs.locate.outputs.directory }}"
+          node << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
 
-      # Locate MSVC
+          const configPath = process.env.CONFIG_PATH;
+          console.log("Loading config from:", configPath);
+
+          const cfg = require(path.resolve(configPath));
+
+          function fail(msg) { console.error(msg); process.exit(1); }
+
+          if (typeof cfg.commitEXE !== 'boolean') fail('commitEXE must be boolean');
+          if (typeof cfg.CI !== 'boolean') fail('CI must be boolean');
+
+          if (!cfg.Advanced) fail('Advanced missing');
+          if (!cfg.Advanced.target) fail('Advanced.target missing');
+          if (!cfg.Advanced.output) fail('Advanced.output missing');
+          if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
+          if (!Array.isArray(cfg.Advanced.flags)) fail('Advanced.flags must be array');
+
+          const flags = cfg.Advanced.flags.join(' ');
+
+          const out =
+            `target=${cfg.Advanced.target}\n` +
+            `output=${cfg.Advanced.output}\n` +
+            `commit2=${cfg.Advanced.commit2}\n` +
+            `flags=${flags}\n` +
+            `commitEXE=${cfg.commitEXE}\n` +
+            `CI=${cfg.CI}\n`;
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
+          EOF
+        env:
+          CONFIG_PATH: ${{ steps.locate_cfg.outputs.config_path }}
+
+      # 3. Locate the target source file anywhere in repo
+      - name: Locate source file
+        id: locate_src
+        shell: bash
+        run: |
+          TARGET="${{ steps.cfg.outputs.target }}"
+          echo "Searching for source file: $TARGET"
+
+          FILE_PATH=$(find . -type f -name "$TARGET" | head -n 1)
+
+          if [ -z "$FILE_PATH" ]; then
+            echo "❌ Source file not found: $TARGET"
+            exit 1
+          fi
+
+          DIR_PATH=$(dirname "$FILE_PATH")
+
+          echo "Found at: $FILE_PATH"
+          echo "directory=$DIR_PATH" >> $GITHUB_OUTPUT
+          echo "filepath=$FILE_PATH" >> $GITHUB_OUTPUT
+
+      # 4. Locate MSVC
       - name: Locate MSVC via vswhere
         id: msvc
         shell: pwsh
@@ -81,15 +119,15 @@ jobs:
           $VcVars = Join-Path $InstallPath "VC\Auxiliary\Build\vcvars64.bat"
           echo "vcvars=$VcVars" >> $env:GITHUB_OUTPUT
 
-      # Build using directory from AnyFiles
+      # 5. Build with MSVC
       - name: Build with MSVC
         shell: cmd
         run: |
           call "${{ steps.msvc.outputs.vcvars }}"
           if not exist build mkdir build
-          cl ${{ steps.cfg.outputs.flags }} "${{ needs.locate.outputs.directory }}\\${{ steps.cfg.outputs.target }}" /Fe:build\${{ steps.cfg.outputs.output }}
+          cl ${{ steps.cfg.outputs.flags }} "${{ steps.locate_src.outputs.filepath }}" /Fe:build\${{ steps.cfg.outputs.output }}
 
-      # Commit EXE if config allows
+      # 6. Commit EXE if config allows
       - name: Commit EXE (config-driven)
         if: >
           steps.cfg.outputs.CI == 'true' &&
@@ -107,7 +145,7 @@ jobs:
             echo "No EXE changes."
           fi
 
-      # Upload artifact
+      # 7. Upload artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
