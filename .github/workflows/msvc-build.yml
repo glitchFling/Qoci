@@ -22,14 +22,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Load msvc.config.js
+      # Load msvc.config.js from the directory AnyFiles found
       - name: Load config.js
         id: cfg
         shell: bash
         run: |
           node << 'EOF'
           const fs = require('fs');
-          const cfg = require('./msvc.config.js');
+          const path = require('path');
+
+          const dir = process.env.DIR;
+          const configPath = path.join(dir, "msvc.config.js");
+
+          console.log("Loading config from:", configPath);
+
+          if (!fs.existsSync(configPath)) {
+            console.error("Config file not found:", configPath);
+            process.exit(1);
+          }
+
+          const cfg = require(configPath);
 
           function fail(msg) { console.error(msg); process.exit(1); }
 
@@ -54,6 +66,8 @@ jobs:
 
           fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
           EOF
+        env:
+          DIR: ${{ needs.locate.outputs.directory }}
 
       # Debug config + AnyFiles directory
       - name: Debug config
