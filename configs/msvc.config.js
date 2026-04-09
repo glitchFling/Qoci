@@ -1,5 +1,5 @@
 module.exports = {
-  commitEXE: true,
+  commitEXE: false,
   CI: true,
 
   Advanced: {
