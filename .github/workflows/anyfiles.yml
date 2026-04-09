@@ -1,53 +1,98 @@
 name: AnyFiles?
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
+  workflow_call:
+    outputs:
+      exists:
+        description: "Whether the target file exists"
+        value: ${{ jobs.scan.outputs.exists }}
+      directory:
+        description: "Directory containing the target file"
+        value: ${{ jobs.scan.outputs.directory }}
 
 jobs:
   scan:
     runs-on: ubuntu-latest
 
+    outputs:
+      exists: ${{ steps.find.outputs.exists }}
+      directory: ${{ steps.find.outputs.directory }}
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Locate anyfiles.config.js anywhere in repo
+        id: locate_cfg
+        run: |
+          echo "Searching for anyfiles.config.js in entire repo..."
+
+          CONFIGS=$(find . -type f -name "anyfiles.config.js")
+
+          COUNT=$(echo "$CONFIGS" | wc -l)
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No anyfiles.config.js found"
+            echo "config_path=" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          if [ "$COUNT" -gt 1 ]; then
+            echo "❌ Multiple anyfiles.config.js files found:"
+            echo "$CONFIGS"
+            exit 1
+          fi
+
+          CONFIG_PATH=$(echo "$CONFIGS")
+          echo "Found config at: $CONFIG_PATH"
+
+          echo "config_path=$CONFIG_PATH" >> $GITHUB_OUTPUT
 
       - name: Load config
         id: cfg
         run: |
-          node <<'EOF'
+          node << 'EOF'
           const fs = require('fs');
-          const cfg = require('./anyfiles.config.js');
 
-          console.log('Config:', cfg);
+          const configPath = process.env.CONFIG_PATH;
+          console.log("Loading config:", configPath);
+
+          if (!fs.existsSync(configPath)) {
+            console.error("Config file missing:", configPath);
+            process.exit(1);
+          }
+
+          const cfg = require(configPath);
+
+          if (!cfg.target || typeof cfg.target !== "string") {
+            console.error("Config error: 'target' must be a string");
+            process.exit(1);
+          }
 
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `target=${cfg.target}\n`);
           EOF
+        env:
+          CONFIG_PATH: ${{ steps.locate_cfg.outputs.config_path }}
 
-      - name: Find directory containing target
-        id: findfile
+      - name: Find target file
+        id: find
         run: |
           TARGET="${{ steps.cfg.outputs.target }}"
-          echo "Searching for: $TARGET"
+          echo "Searching for target file: $TARGET"
 
           FILE_PATH=$(find . -type f -name "$TARGET" | head -n 1)
 
           if [ -z "$FILE_PATH" ]; then
-            echo "❌ FALSE"
-            echo "exists=❌ FALSE" >> $GITHUB_OUTPUT
+            echo "Target file not found."
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "directory=" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           DIR_PATH=$(dirname "$FILE_PATH")
 
-          echo "✔️ TRUE"
+          echo "Found at: $FILE_PATH"
           echo "Directory: $DIR_PATH"
 
-          echo "exists=✔️ TRUE" >> $GITHUB_OUTPUT
+          echo "exists=true" >> $GITHUB_OUTPUT
           echo "directory=$DIR_PATH" >> $GITHUB_OUTPUT
