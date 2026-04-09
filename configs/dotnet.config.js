@@ -1,6 +1,6 @@
 module.exports = {
   commitDll: true,
-  commitCs: true,
+  commitCs: false,
   CI: true,
 
   Advanced: {
