@@ -1,11 +1,8 @@
 name: MSYS2 UCRT64 CI
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
+  workflow_dispatch:
+  
 jobs:
   build:
     runs-on: windows-latest
