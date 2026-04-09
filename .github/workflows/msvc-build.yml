@@ -23,51 +23,33 @@ jobs:
         uses: actions/checkout@v4
 
       # Load msvc.config.js from the directory AnyFiles found
-      - name: Load config.js
-        id: cfg
+      - name: Locate msvc.config.js anywhere in repo
+        id: locate_msvc_cfg
         shell: bash
         run: |
-          node << 'EOF'
-          const fs = require('fs');
-          const path = require('path');
+          echo "Searching for msvc.config.js in entire repo..."
       
-          const dir = process.env.DIR; // <-- AnyFiles directory
-          const configPath = path.join(${{ needs.locate.outputs.directory }}, "msvc.config.js");
+          CONFIGS=$(find . -type f -name "msvc.config.js")
       
-          console.log("Loading config from:", configPath);
+          COUNT=$(echo "$CONFIGS" | wc -l)
       
-          if (!fs.existsSync(configPath)) {
-            console.error("Config file not found:", configPath);
-            process.exit(1);
-          }
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No msvc.config.js found"
+            exit 1
+          fi
       
-          const cfg = require(configPath);
+          if [ "$COUNT" -gt 1 ]; then
+            echo "❌ Multiple msvc.config.js files found:"
+            echo "$CONFIGS"
+            exit 1
+          fi
       
-          function fail(msg) { console.error(msg); process.exit(1); }
+          CONFIG_PATH=$(echo "$CONFIGS")
+          echo "Found config at: $CONFIG_PATH"
       
-          if (typeof cfg.commitEXE !== 'boolean') fail('commitEXE must be boolean');
-          if (typeof cfg.CI !== 'boolean') fail('CI must be boolean');
-      
-          if (!cfg.Advanced) fail('Advanced missing');
-          if (!cfg.Advanced.target) fail('Advanced.target missing');
-          if (!cfg.Advanced.output) fail('Advanced.output missing');
-          if (!cfg.Advanced.commit2) fail('Advanced.commit2 missing');
-          if (!Array.isArray(cfg.Advanced.flags)) fail('Advanced.flags must be array');
-      
-          const flags = cfg.Advanced.flags.join(' ');
-      
-          const out =
-            `target=${cfg.Advanced.target}\n` +
-            `output=${cfg.Advanced.output}\n` +
-            `commit2=${cfg.Advanced.commit2}\n` +
-            `flags=${flags}\n` +
-            `commitEXE=${cfg.commitEXE}\n` +
-            `CI=${cfg.CI}\n`;
-      
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
-          EOF
-        env:
-          DIR: ${{ needs.locate.outputs.directory }}
+          echo "config_path=$CONFIG_PATH" >> $GITHUB_OUTPUT
+
+
 
 
       # Debug config + AnyFiles directory
