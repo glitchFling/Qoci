@@ -2,18 +2,14 @@
   (local $i i32)
   (local $tail i32)
   (local $shift i32)
-
-  ;; 4 core state words
   (local $v0 i32)
   (local $v1 i32)
   (local $v2 i32)
   (local $v3 i32)
-
-  ;; temp
   (local $w i32)
-  (local $tmp i32)
+  (local $x i32)
 
-  ;; initialize state with constants ^ len
+  ;; init
   i32.const 0x243f6a88
   local.get $len
   i32.xor
@@ -40,14 +36,12 @@
   i32.xor
   local.set $v3
 
-  ;; i = 0
   i32.const 0
   local.set $i
 
-  ;; ---- MAIN LOOP: process 4-byte words ----
+  ;; main loop: 4-byte chunks
   block $break
     loop $loop
-      ;; if i+4 > len break
       local.get $i
       i32.const 4
       i32.add
@@ -55,7 +49,6 @@
       i32.gt_u
       br_if $break
 
-      ;; load 32-bit word w = *(u32*)(i)
       local.get $i
       i32.load
       local.set $w
@@ -66,16 +59,12 @@
       i32.add
       local.set $v0
 
-      ;; v1 ^= rotl(v0,13)
+      ;; v1 ^= rotl(v0,13); v1 *= 0x85ebca6b
       local.get $v0
       i32.const 13
       i32.rotl
       local.get $v1
       i32.xor
-      local.set $v1
-
-      ;; v1 *= 0x85ebca6b
-      local.get $v1
       i32.const 0x85ebca6b
       i32.mul
       local.set $v1
@@ -86,34 +75,27 @@
       i32.add
       local.set $v2
 
-      ;; v3 ^= rotl(v2,17)
+      ;; v3 ^= rotl(v2,17); v3 *= 0xc2b2ae35
       local.get $v2
       i32.const 17
       i32.rotl
       local.get $v3
       i32.xor
-      local.set $v3
-
-      ;; v3 *= 0xc2b2ae35
-      local.get $v3
       i32.const 0xc2b2ae35
       i32.mul
       local.set $v3
 
-      ;; cross-lane mixing
-      ;; v0 ^= v3
+      ;; cross-lane
       local.get $v0
       local.get $v3
       i32.xor
       local.set $v0
 
-      ;; v2 ^= v1
       local.get $v2
       local.get $v1
       i32.xor
       local.set $v2
 
-      ;; i += 4
       local.get $i
       i32.const 4
       i32.add
@@ -123,20 +105,19 @@
     end
   end
 
-  ;; ---- TAIL BYTES ----
+  ;; tail bytes
   i32.const 0
   local.set $tail
   i32.const 0
   local.set $shift
 
-  block $tailbreak
-    loop $tailloop
+  block $tbreak
+    loop $tloop
       local.get $i
       local.get $len
       i32.ge_u
-      br_if $tailbreak
+      br_if $tbreak
 
-      ;; tail |= mem[i] << shift
       local.get $tail
       local.get $i
       i32.load8_u
@@ -145,57 +126,42 @@
       i32.or
       local.set $tail
 
-      ;; shift += 8
       local.get $shift
       i32.const 8
       i32.add
       local.set $shift
 
-      ;; i++
       local.get $i
       i32.const 1
       i32.add
       local.set $i
 
-      br $tailloop
+      br $tloop
     end
   end
 
-  ;; if tail != 0: mix it
   local.get $shift
   i32.const 0
   i32.gt_s
   if
-    ;; v0 += tail
     local.get $v0
     local.get $tail
     i32.add
     local.set $v0
 
-    ;; v1 ^= rotl(v0,15)
     local.get $v0
     i32.const 15
     i32.rotl
     local.get $v1
     i32.xor
-    local.set $v1
-
-    ;; v1 *= 0x85ebca6b
-    local.get $v1
     i32.const 0x85ebca6b
     i32.mul
     local.set $v1
   end
 
-  ;; ---- AVALANCHE FUNCTION ----
-  ;; define inline macro-like avalanche(x):
-  ;; x ^= x >> 16
-  ;; x *= 0x85ebca6b
-  ;; x ^= x >> 13
-  ;; x *= 0xc2b2ae35
-  ;; x ^= x >> 16
+  ;; avalanche v0..v3 (inline, same pattern each time)
 
-  ;; avalanche v0
+  ;; v0
   local.get $v0
   local.get $v0
   i32.const 16
@@ -217,7 +183,7 @@
   i32.xor
   local.set $v0
 
-  ;; avalanche v1
+  ;; v1
   local.get $v1
   local.get $v1
   i32.const 16
@@ -239,7 +205,7 @@
   i32.xor
   local.set $v1
 
-  ;; avalanche v2
+  ;; v2
   local.get $v2
   local.get $v2
   i32.const 16
@@ -261,7 +227,7 @@
   i32.xor
   local.set $v2
 
-  ;; avalanche v3
+  ;; v3
   local.get $v3
   local.get $v3
   i32.const 16
@@ -283,142 +249,109 @@
   i32.xor
   local.set $v3
 
-  ;; ---- EXPAND 4 WORDS → 16 WORDS (512 bits) ----
+  ;; write 16 words (expand via simple mixes)
 
-  ;; store v0..v3
+  ;; 0: v0
   i32.const 0
   local.get $v0
   i32.store
 
+  ;; 1: v1
   i32.const 4
   local.get $v1
   i32.store
 
+  ;; 2: v2
   i32.const 8
   local.get $v2
   i32.store
 
+  ;; 3: v3
   i32.const 12
   local.get $v3
   i32.store
 
-  ;; derive 12 more words via mixing
-  ;; out[4] = avalanche(v0 ^ v1)
+  ;; 4: v0 ^ v1
   i32.const 16
   local.get $v0
   local.get $v1
   i32.xor
-  call $av
   i32.store
 
-  ;; out[5] = avalanche(v0 ^ v2)
+  ;; 5: v0 ^ v2
   i32.const 20
   local.get $v0
   local.get $v2
   i32.xor
-  call $av
   i32.store
 
-  ;; out[6] = avalanche(v0 ^ v3)
+  ;; 6: v0 ^ v3
   i32.const 24
   local.get $v0
   local.get $v3
   i32.xor
-  call $av
   i32.store
 
-  ;; out[7] = avalanche(v1 ^ v2)
+  ;; 7: v1 ^ v2
   i32.const 28
   local.get $v1
   local.get $v2
   i32.xor
-  call $av
   i32.store
 
-  ;; out[8] = avalanche(v1 ^ v3)
+  ;; 8: v1 ^ v3
   i32.const 32
   local.get $v1
   local.get $v3
   i32.xor
-  call $av
   i32.store
 
-  ;; out[9] = avalanche(v2 ^ v3)
+  ;; 9: v2 ^ v3
   i32.const 36
   local.get $v2
   local.get $v3
   i32.xor
-  call $av
   i32.store
 
-  ;; out[10] = avalanche(v0 + v1)
+  ;; 10: v0 + v1
   i32.const 40
   local.get $v0
   local.get $v1
   i32.add
-  call $av
   i32.store
 
-  ;; out[11] = avalanche(v0 + v2)
+  ;; 11: v0 + v2
   i32.const 44
   local.get $v0
   local.get $v2
   i32.add
-  call $av
   i32.store
 
-  ;; out[12] = avalanche(v0 + v3)
+  ;; 12: v0 + v3
   i32.const 48
   local.get $v0
   local.get $v3
   i32.add
-  call $av
   i32.store
 
-  ;; out[13] = avalanche(v1 + v2)
+  ;; 13: v1 + v2
   i32.const 52
   local.get $v1
   local.get $v2
   i32.add
-  call $av
   i32.store
 
-  ;; out[14] = avalanche(v1 + v3)
+  ;; 14: v1 + v3
   i32.const 56
   local.get $v1
   local.get $v3
   i32.add
-  call $av
   i32.store
 
-  ;; out[15] = avalanche(v2 + v3)
+  ;; 15: v2 + v3
   i32.const 60
   local.get $v2
   local.get $v3
   i32.add
-  call $av
   i32.store
-)
-
-;; helper avalanche function
-(func $av (param $x i32) (result i32)
-  local.get $x
-  local.get $x
-  i32.const 16
-  i32.shr_u
-  i32.xor
-  i32.const 0x85ebca6b
-  i32.mul
-  local.tee $x
-  local.get $x
-  i32.const 13
-  i32.shr_u
-  i32.xor
-  i32.const 0xc2b2ae35
-  i32.mul
-  local.tee $x
-  local.get $x
-  i32.const 16
-  i32.shr_u
-  i32.xor
 )
