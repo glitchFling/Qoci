@@ -1,27 +1,31 @@
 (module
-  ;; 1. Allocate 510MB (8160 pages * 64KiB)
-  ;; Format: (memory $name initial_pages)
-  (memory (export "memory") 8160)
+  ;; 1. Allocate 1GB of linear memory (16384 pages * 64KiB)
+  ;; This ensures the "Bot-Killer" RAM pressure is available.
+  (memory (export "memory") 16384)
 
-  ;; 2. Iteration Function
-  (func (export "iterate_memory")
-    (local $ptr i32)   ;; Current memory address (pointer)
-    (local $end i32)   ;; End address (510 * 1024 * 1024)
+  ;; 2. The iteration function
+  ;; Takes $byteLimit as an argument from JavaScript
+  (func (export "iterate_memory") (param $byteLimit i32)
+    (local $ptr i32)
     
-    ;; Set end boundary: 534,773,760 bytes
-    (local.set $end (i32.const 534773760))
+    ;; Initialize pointer at start of memory
     (local.set $ptr (i32.const 0))
 
-    (loop $loop
-      ;; Store the value 1 at the current pointer address
-      ;; (i32.store8 address value)
-      (i32.store8 (local.get $ptr) (i32.const 1))
+    ;; Safety block: If JS passes 0, we skip the loop entirely
+    (block $exit
+      (br_if $exit (i32.eq (local.get $byteLimit) (i32.const 0)))
+      
+      ;; Start of the heavy iteration loop
+      (loop $loop
+        ;; Store the byte value 1 at current pointer address
+        (i32.store8 (local.get $ptr) (i32.const 1))
 
-      ;; Increment pointer by 1 byte
-      (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
+        ;; Increment pointer by 1 byte
+        (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
 
-      ;; Branch back to $loop if $ptr < $end
-      (br_if $loop (i32.lt_u (local.get $ptr) (local.get $end)))
+        ;; Comparison: Loop back if $ptr < $byteLimit
+        (br_if $loop (i32.lt_u (local.get $ptr) (local.get $byteLimit)))
+      )
     )
   )
 )
