@@ -1,0 +1,30 @@
+name: Build WASM from WAT
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install WABT (WebAssembly Binary Toolkit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wabt
+
+      - name: Compile WAT to WASM
+        # Assumes your file is named memory.wat
+        run: wat2wasm memory.wat -o memory.wasm
+
+      - name: Upload WASM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-wasm
+          path: memory.wasm
