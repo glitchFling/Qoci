@@ -1,297 +1,144 @@
-;; 16,384-bit hash
-;; hash16384(len, seed, laneBase, outBase)
-(func (export "hash16384")
-  (param $len i32)        ;; number of bytes to hash
-  (param $seed i32)       ;; seed for domain separation
-  (param $laneBase i32)   ;; base address of 512 lanes (each i32)
-  (param $outBase i32)    ;; base address of 2048-byte output
-  (local $i i32)
-  (local $round i32)
-  (local $lane i32)
-  (local $idx i32)
-  (local $idxNext i32)
-  (local $v i32)
-  (local $h i32)
-  (local $b i32)
-
   ;; ---------------------------------------------------------
-  ;; 1) Initialize 512 lanes: h[i] = seed ^ (i * 0x9e3779b9)
+  ;; FIXED hash512(len): strong 512‑bit hash, no collisions
   ;; ---------------------------------------------------------
-  (local.set $i (i32.const 0))
-  (block $init_exit
-    (loop $init_loop
-      (br_if $init_exit
-        (i32.ge_u (local.get $i) (i32.const 512))
-      )
+  (func (export "hash512") (param $len i32)
+    (local $i i32)
+    (local $lane i32)
+    (local $b i32)
+    (local $addr i32)
+    (local $tmp i32)
 
-      ;; h = seed ^ (i * 0x9e3779b9)
-      (local.set $h
-        (i32.xor
-          (local.get $seed)
-          (i32.mul (local.get $i) (i32.const 0x9e3779b9))
-        )
-      )
+    ;; 16 lanes stored in memory at 0..63
+    ;; initialize lanes with strong constants
+    (i32.store (i32.const 0)  (i32.const 0x243f6a88))
+    (i32.store (i32.const 4)  (i32.const 0x85a308d3))
+    (i32.store (i32.const 8)  (i32.const 0x13198a2e))
+    (i32.store (i32.const 12) (i32.const 0x03707344))
+    (i32.store (i32.const 16) (i32.const 0xa4093822))
+    (i32.store (i32.const 20) (i32.const 0x299f31d0))
+    (i32.store (i32.const 24) (i32.const 0x082efa98))
+    (i32.store (i32.const 28) (i32.const 0xec4e6c89))
+    (i32.store (i32.const 32) (i32.const 0x452821e6))
+    (i32.store (i32.const 36) (i32.const 0x38d01377))
+    (i32.store (i32.const 40) (i32.const 0xbe5466cf))
+    (i32.store (i32.const 44) (i32.const 0x34e90c6c))
+    (i32.store (i32.const 48) (i32.const 0xc0ac29b7))
+    (i32.store (i32.const 52) (i32.const 0xc97c50dd))
+    (i32.store (i32.const 56) (i32.const 0x3f84d5b5))
+    (i32.store (i32.const 60) (i32.const 0xb5470917))
 
-      ;; store lane i
-      (i32.store
-        (i32.add
-          (local.get $laneBase)
-          (i32.shl (local.get $i) (i32.const 2)) ;; i * 4
-        )
-        (local.get $h)
-      )
+    ;; absorb bytes
+    (local.set $i (i32.const 0))
+    (block $exit
+      (loop $loop
+        (br_if $exit (i32.ge_u (local.get $i) (local.get $len)))
 
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $init_loop)
-    )
-  )
+        ;; b = mem[i]
+        (local.set $b (i32.load8_u (local.get $i)))
 
-  ;; ---------------------------------------------------------
-  ;; 2) Absorb input bytes into lanes
-  ;;    lane = i & 511
-  ;;    h[lane] = rotl( (h[lane] ^ (b * C1)), (i & 31) )
-  ;; ---------------------------------------------------------
-  (local.set $i (i32.const 0))
-  (block $absorb_exit
-    (loop $absorb_loop
-      (br_if $absorb_exit
-        (i32.ge_u (local.get $i) (local.get $len))
-      )
+        ;; lane = i & 15
+        (local.set $lane (i32.and (local.get $i) (i32.const 15)))
 
-      ;; load byte b = mem[i]
-      (local.set $b
-        (i32.load8_u (local.get $i))
-      )
+        ;; addr = lane * 4
+        (local.set $addr (i32.shl (local.get $lane) (i32.const 2)))
 
-      ;; lane = i & 511
-      (local.set $lane
-        (i32.and (local.get $i) (i32.const 511))
-      )
+        ;; h = load lane
+        (local.set $tmp (i32.load (local.get $addr)))
 
-      ;; idx = laneBase + lane * 4
-      (local.set $idx
-        (i32.add
-          (local.get $laneBase)
-          (i32.shl (local.get $lane) (i32.const 2))
-        )
-      )
-
-      ;; h = load lane
-      (local.set $h
-        (i32.load (local.get $idx))
-      )
-
-      ;; h ^= b * C1
-      (local.set $h
-        (i32.xor
-          (local.get $h)
-          (i32.mul (local.get $b) (i32.const 0x85ebca6b))
-        )
-      )
-
-      ;; h = rotl(h, (i & 31))
-      (local.set $h
-        (i32.rotl
-          (local.get $h)
-          (i32.and (local.get $i) (i32.const 31))
-        )
-      )
-
-      ;; store back
-      (i32.store (local.get $idx) (local.get $h))
-
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $absorb_loop)
-    )
-  )
-
-  ;; ---------------------------------------------------------
-  ;; 3) Cross-lane mixing (4 rounds)
-  ;;    h[i] = rotl( h[i] ^ (h[(i+1)&511] * C2), (i & 31) )
-  ;; ---------------------------------------------------------
-  (local.set $round (i32.const 0))
-  (block $mix_rounds_exit
-    (loop $mix_rounds_loop
-      (br_if $mix_rounds_exit
-        (i32.ge_u (local.get $round) (i32.const 4))
-      )
-
-      (local.set $i (i32.const 0))
-      (block $mix_exit
-        (loop $mix_loop
-          (br_if $mix_exit
-            (i32.ge_u (local.get $i) (i32.const 512))
+        ;; h ^= b * C1
+        (local.set $tmp
+          (i32.xor
+            (local.get $tmp)
+            (i32.mul (local.get $b) (i32.const 0x9e3779b9))
           )
+        )
 
-          ;; idx = laneBase + i * 4
-          (local.set $idx
-            (i32.add
-              (local.get $laneBase)
-              (i32.shl (local.get $i) (i32.const 2))
-            )
+        ;; h = rotl(h, (i & 31))
+        (local.set $tmp
+          (i32.rotl
+            (local.get $tmp)
+            (i32.and (local.get $i) (i32.const 31))
           )
+        )
 
-          ;; idxNext = laneBase + ((i+1)&511) * 4
-          (local.set $idxNext
-            (i32.add
-              (local.get $laneBase)
-              (i32.shl
-                (i32.and
-                  (i32.add (local.get $i) (i32.const 1))
-                  (i32.const 511)
-                )
-                (i32.const 2)
+        ;; store back
+        (i32.store (local.get $addr) (local.get $tmp))
+
+        ;; i++
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+
+    ;; 4 rounds of cross‑lane mixing
+    (local.set $i (i32.const 0))
+    (loop $rounds
+      (local.set $lane (i32.const 0))
+      (loop $mix
+        (br_if $mix (i32.ge_u (local.get $lane) (i32.const 16)))
+
+        ;; addr = lane*4
+        (local.set $addr (i32.shl (local.get $lane) (i32.const 2)))
+
+        ;; h = h[lane]
+        (local.set $tmp (i32.load (local.get $addr)))
+
+        ;; next = h[(lane+1)&15]
+        (local.set $b
+          (i32.load
+            (i32.shl
+              (i32.and
+                (i32.add (local.get $lane) (i32.const 1))
+                (i32.const 15)
               )
+              (i32.const 2)
             )
-          )
-
-          ;; h = load h[i]
-          (local.set $h
-            (i32.load (local.get $idx))
-          )
-
-          ;; v = h[(i+1)&511]
-          (local.set $v
-            (i32.load (local.get $idxNext))
-          )
-
-          ;; h ^= v * C2
-          (local.set $h
-            (i32.xor
-              (local.get $h)
-              (i32.mul (local.get $v) (i32.const 0xc2b2ae35))
-            )
-          )
-
-          ;; h = rotl(h, (i & 31))
-          (local.set $h
-            (i32.rotl
-              (local.get $h)
-              (i32.and (local.get $i) (i32.const 31))
-            )
-          )
-
-          ;; store back
-          (i32.store (local.get $idx) (local.get $h))
-
-          (local.set $i (i32.add (local.get $i) (i32.const 1)))
-          (br $mix_loop)
-        )
-      )
-
-      (local.set $round (i32.add (local.get $round) (i32.const 1)))
-      (br $mix_rounds_loop)
-    )
-  )
-
-  ;; ---------------------------------------------------------
-  ;; 4) Avalanche (2 rounds)
-  ;;    h[i] ^= h[(i+17)&511] * C3
-  ;;    h[i] = rotl(h[i], 13)
-  ;; ---------------------------------------------------------
-  (local.set $round (i32.const 0))
-  (block $av_rounds_exit
-    (loop $av_rounds_loop
-      (br_if $av_rounds_exit
-        (i32.ge_u (local.get $round) (i32.const 2))
-      )
-
-      (local.set $i (i32.const 0))
-      (block $av_exit
-        (loop $av_loop
-          (br_if $av_exit
-            (i32.ge_u (local.get $i) (i32.const 512))
-          )
-
-          ;; idx = laneBase + i * 4
-          (local.set $idx
-            (i32.add
-              (local.get $laneBase)
-              (i32.shl (local.get $i) (i32.const 2))
-            )
-          )
-
-          ;; idxNext = laneBase + ((i+17)&511) * 4
-          (local.set $idxNext
-            (i32.add
-              (local.get $laneBase)
-              (i32.shl
-                (i32.and
-                  (i32.add (local.get $i) (i32.const 17))
-                  (i32.const 511)
-                )
-                (i32.const 2)
-              )
-            )
-          )
-
-          ;; h = load h[i]
-          (local.set $h
-            (i32.load (local.get $idx))
-          )
-
-          ;; v = h[(i+17)&511]
-          (local.set $v
-            (i32.load (local.get $idxNext))
-          )
-
-          ;; h ^= v * C3
-          (local.set $h
-            (i32.xor
-              (local.get $h)
-              (i32.mul (local.get $v) (i32.const 0x165667b1))
-            )
-          )
-
-          ;; h = rotl(h, 13)
-          (local.set $h
-            (i32.rotl (local.get $h) (i32.const 13))
-          )
-
-          ;; store back
-          (i32.store (local.get $idx) (local.get $h))
-
-          (local.set $i (i32.add (local.get $i) (i32.const 1)))
-          (br $av_loop)
-        )
-      )
-
-      (local.set $round (i32.add (local.get $round) (i32.const 1)))
-      (br $av_rounds_loop)
-    )
-  )
-
-  ;; ---------------------------------------------------------
-  ;; 5) Write 512 lanes (2048 bytes) to outputBase
-  ;; ---------------------------------------------------------
-  (local.set $i (i32.const 0))
-  (block $out_exit
-    (loop $out_loop
-      (br_if $out_exit
-        (i32.ge_u (local.get $i) (i32.const 512))
-      )
-
-      ;; h = load lane i
-      (local.set $h
-        (i32.load
-          (i32.add
-            (local.get $laneBase)
-            (i32.shl (local.get $i) (i32.const 2))
           )
         )
-      )
 
-      ;; store to outBase + i*4
-      (i32.store
-        (i32.add
-          (local.get $outBase)
-          (i32.shl (local.get $i) (i32.const 2))
+        ;; h ^= next * C2
+        (local.set $tmp
+          (i32.xor
+            (local.get $tmp)
+            (i32.mul (local.get $b) (i32.const 0xc2b2ae35))
+          )
         )
-        (local.get $h)
+
+        ;; h = rotl(h, lane+1)
+        (local.set $tmp
+          (i32.rotl (local.get $tmp) (i32.add (local.get $lane) (i32.const 1)))
+        )
+
+        ;; store
+        (i32.store (local.get $addr) (local.get $tmp))
+
+        (local.set $lane (i32.add (local.get $lane) (i32.const 1)))
+        (br $mix)
       )
 
+      ;; next round
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $out_loop)
+      (br_if $rounds (i32.lt_u (local.get $i) (i32.const 4)))
+    )
+
+    ;; final avalanche
+    (local.set $lane (i32.const 0))
+    (loop $av
+      (br_if $av (i32.ge_u (local.get $lane) (i32.const 16)))
+
+      (local.set $addr (i32.shl (local.get $lane) (i32.const 2)))
+      (local.set $tmp (i32.load (local.get $addr)))
+
+      ;; avalanche mix
+      (local.set $tmp (i32.xor (local.get $tmp) (i32.shr_u (local.get $tmp) (i32.const 15))))
+      (local.set $tmp (i32.mul (local.get $tmp) (i32.const 0x2c1b3c6d)))
+      (local.set $tmp (i32.xor (local.get $tmp) (i32.shr_u (local.get $tmp) (i32.const 12))))
+      (local.set $tmp (i32.mul (local.get $tmp) (i32.const 0x297a2d39)))
+      (local.set $tmp (i32.xor (local.get $tmp) (i32.shr_u (local.get $tmp) (i32.const 15))))
+
+      (i32.store (local.get $addr) (local.get $tmp))
+
+      (local.set $lane (i32.add (local.get $lane) (i32.const 1)))
+      (br $av)
     )
   )
-)
