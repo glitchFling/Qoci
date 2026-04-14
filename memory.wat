@@ -1,387 +1,297 @@
-(module
-  ;; 16 MiB memory (16384 * 64 KiB)
-  (memory (export "memory") 16384)
+;; 16,384-bit hash
+;; hash16384(len, seed, laneBase, outBase)
+(func (export "hash16384")
+  (param $len i32)        ;; number of bytes to hash
+  (param $seed i32)       ;; seed for domain separation
+  (param $laneBase i32)   ;; base address of 512 lanes (each i32)
+  (param $outBase i32)    ;; base address of 2048-byte output
+  (local $i i32)
+  (local $round i32)
+  (local $lane i32)
+  (local $idx i32)
+  (local $idxNext i32)
+  (local $v i32)
+  (local $h i32)
+  (local $b i32)
 
   ;; ---------------------------------------------------------
-  ;; Same iterator as before: fills [0, byteLimit) with LCG noise
+  ;; 1) Initialize 512 lanes: h[i] = seed ^ (i * 0x9e3779b9)
   ;; ---------------------------------------------------------
-  (func (export "iterate_memory") (param $byteLimit i32) (param $seed i32)
-    (local $ptr i32)
-    (local $state i32)
-
-    (local.set $ptr (i32.const 0))
-    (local.set $state (local.get $seed))
-
-    (block $exit
-      (br_if $exit (i32.eq (local.get $byteLimit) (i32.const 0)))
-
-      (loop $loop
-        ;; state = state * 1664525 + 1013904223
-        (local.set $state
-          (i32.add
-            (i32.mul (local.get $state) (i32.const 1664525))
-            (i32.const 1013904223)
-          )
-        )
-
-        ;; store low 8 bits
-        (i32.store8 (local.get $ptr) (local.get $state))
-
-        ;; ptr++
-        (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
-
-        (br_if $loop (i32.lt_u (local.get $ptr) (local.get $byteLimit)))
+  (local.set $i (i32.const 0))
+  (block $init_exit
+    (loop $init_loop
+      (br_if $init_exit
+        (i32.ge_u (local.get $i) (i32.const 512))
       )
+
+      ;; h = seed ^ (i * 0x9e3779b9)
+      (local.set $h
+        (i32.xor
+          (local.get $seed)
+          (i32.mul (local.get $i) (i32.const 0x9e3779b9))
+        )
+      )
+
+      ;; store lane i
+      (i32.store
+        (i32.add
+          (local.get $laneBase)
+          (i32.shl (local.get $i) (i32.const 2)) ;; i * 4
+        )
+        (local.get $h)
+      )
+
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $init_loop)
     )
   )
 
   ;; ---------------------------------------------------------
-  ;; hash512(len): 512-bit hash over first `len` bytes
-  ;; - 16 lanes (h0..h15)
-  ;; - per-lane mixing
-  ;; - cross-lane mixing
-  ;; - final avalanche
-  ;; Writes 16 x i32 (64 bytes) at offset 0
+  ;; 2) Absorb input bytes into lanes
+  ;;    lane = i & 511
+  ;;    h[lane] = rotl( (h[lane] ^ (b * C1)), (i & 31) )
   ;; ---------------------------------------------------------
-  (func (export "hash512") (param $len i32)
-    (local $i i32)
+  (local.set $i (i32.const 0))
+  (block $absorb_exit
+    (loop $absorb_loop
+      (br_if $absorb_exit
+        (i32.ge_u (local.get $i) (local.get $len))
+      )
 
-    (local $b0 i32) (local $b1 i32) (local $b2 i32) (local $b3 i32)
-    (local $b4 i32) (local $b5 i32) (local $b6 i32) (local $b7 i32)
-    (local $b8 i32) (local $b9 i32) (local $b10 i32) (local $b11 i32)
-    (local $b12 i32) (local $b13 i32) (local $b14 i32) (local $b15 i32)
+      ;; load byte b = mem[i]
+      (local.set $b
+        (i32.load8_u (local.get $i))
+      )
 
-    (local $h0 i32) (local $h1 i32) (local $h2 i32) (local $h3 i32)
-    (local $h4 i32) (local $h5 i32) (local $h6 i32) (local $h7 i32)
-    (local $h8 i32) (local $h9 i32) (local $h10 i32) (local $h11 i32)
-    (local $h12 i32) (local $h13 i32) (local $h14 i32) (local $h15 i32)
+      ;; lane = i & 511
+      (local.set $lane
+        (i32.and (local.get $i) (i32.const 511))
+      )
 
-    (local $t0 i32) (local $t1 i32) (local $t2 i32) (local $t3 i32)
-    (local $t4 i32) (local $t5 i32) (local $t6 i32) (local $t7 i32)
-    (local $t8 i32) (local $t9 i32) (local $t10 i32) (local $t11 i32)
-    (local $t12 i32) (local $t13 i32) (local $t14 i32) (local $t15 i32)
+      ;; idx = laneBase + lane * 4
+      (local.set $idx
+        (i32.add
+          (local.get $laneBase)
+          (i32.shl (local.get $lane) (i32.const 2))
+        )
+      )
 
-    (local $v i32)
+      ;; h = load lane
+      (local.set $h
+        (i32.load (local.get $idx))
+      )
 
-    ;; init lanes (base constants)
-    (local.set $h0  (i32.const 0x9e3779b9))
-    (local.set $h1  (i32.const 0x85ebca6b))
-    (local.set $h2  (i32.const 0xc2b2ae35))
-    (local.set $h3  (i32.const 0x27d4eb2f))
-    (local.set $h4  (i32.const 0x165667b1))
-    (local.set $h5  (i32.const 0xd3a2646c))
-    (local.set $h6  (i32.const 0x7f4a7c15))
-    (local.set $h7  (i32.const 0xf39cc060))
-    (local.set $h8  (i32.const 0x106aa070))
-    (local.set $h9  (i32.const 0x1e376c08))
-    (local.set $h10 (i32.const 0x2748774c))
-    (local.set $h11 (i32.const 0x34b0bcb5))
-    (local.set $h12 (i32.const 0x391c0cb3))
-    (local.set $h13 (i32.const 0x4ed8aa4a))
-    (local.set $h14 (i32.const 0x5b9cca4f))
-    (local.set $h15 (i32.const 0x682e6ff3))
+      ;; h ^= b * C1
+      (local.set $h
+        (i32.xor
+          (local.get $h)
+          (i32.mul (local.get $b) (i32.const 0x85ebca6b))
+        )
+      )
 
-    ;; domain separation: fold len into lanes
-    (local.set $h0  (i32.xor (local.get $h0)  (local.get $len)))
-    (local.set $h1  (i32.xor (local.get $h1)  (i32.shl (local.get $len) (i32.const 1))))
-    (local.set $h2  (i32.xor (local.get $h2)  (i32.shl (local.get $len) (i32.const 2))))
-    (local.set $h3  (i32.xor (local.get $h3)  (i32.shl (local.get $len) (i32.const 3))))
-    (local.set $h4  (i32.xor (local.get $h4)  (i32.shl (local.get $len) (i32.const 4))))
-    (local.set $h5  (i32.xor (local.get $h5)  (i32.shl (local.get $len) (i32.const 5))))
-    (local.set $h6  (i32.xor (local.get $h6)  (i32.shl (local.get $len) (i32.const 6))))
-    (local.set $h7  (i32.xor (local.get $h7)  (i32.shl (local.get $len) (i32.const 7))))
-    (local.set $h8  (i32.xor (local.get $h8)  (i32.shl (local.get $len) (i32.const 8))))
-    (local.set $h9  (i32.xor (local.get $h9)  (i32.shl (local.get $len) (i32.const 9))))
-    (local.set $h10 (i32.xor (local.get $h10) (i32.shl (local.get $len) (i32.const 10))))
-    (local.set $h11 (i32.xor (local.get $h11) (i32.shl (local.get $len) (i32.const 11))))
-    (local.set $h12 (i32.xor (local.get $h12) (i32.shl (local.get $len) (i32.const 12))))
-    (local.set $h13 (i32.xor (local.get $h13) (i32.shl (local.get $len) (i32.const 13))))
-    (local.set $h14 (i32.xor (local.get $h14) (i32.shl (local.get $len) (i32.const 14))))
-    (local.set $h15 (i32.xor (local.get $h15) (i32.shl (local.get $len) (i32.const 15))))
+      ;; h = rotl(h, (i & 31))
+      (local.set $h
+        (i32.rotl
+          (local.get $h)
+          (i32.and (local.get $i) (i32.const 31))
+        )
+      )
 
-    (local.set $i (i32.const 0))
+      ;; store back
+      (i32.store (local.get $idx) (local.get $h))
 
-    (block $exit
-      (loop $loop
-        ;; stop if i + 15 >= len
-        (br_if $exit
-          (i32.ge_u
-            (i32.add (local.get $i) (i32.const 15))
-            (local.get $len)
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $absorb_loop)
+    )
+  )
+
+  ;; ---------------------------------------------------------
+  ;; 3) Cross-lane mixing (4 rounds)
+  ;;    h[i] = rotl( h[i] ^ (h[(i+1)&511] * C2), (i & 31) )
+  ;; ---------------------------------------------------------
+  (local.set $round (i32.const 0))
+  (block $mix_rounds_exit
+    (loop $mix_rounds_loop
+      (br_if $mix_rounds_exit
+        (i32.ge_u (local.get $round) (i32.const 4))
+      )
+
+      (local.set $i (i32.const 0))
+      (block $mix_exit
+        (loop $mix_loop
+          (br_if $mix_exit
+            (i32.ge_u (local.get $i) (i32.const 512))
+          )
+
+          ;; idx = laneBase + i * 4
+          (local.set $idx
+            (i32.add
+              (local.get $laneBase)
+              (i32.shl (local.get $i) (i32.const 2))
+            )
+          )
+
+          ;; idxNext = laneBase + ((i+1)&511) * 4
+          (local.set $idxNext
+            (i32.add
+              (local.get $laneBase)
+              (i32.shl
+                (i32.and
+                  (i32.add (local.get $i) (i32.const 1))
+                  (i32.const 511)
+                )
+                (i32.const 2)
+              )
+            )
+          )
+
+          ;; h = load h[i]
+          (local.set $h
+            (i32.load (local.get $idx))
+          )
+
+          ;; v = h[(i+1)&511]
+          (local.set $v
+            (i32.load (local.get $idxNext))
+          )
+
+          ;; h ^= v * C2
+          (local.set $h
+            (i32.xor
+              (local.get $h)
+              (i32.mul (local.get $v) (i32.const 0xc2b2ae35))
+            )
+          )
+
+          ;; h = rotl(h, (i & 31))
+          (local.set $h
+            (i32.rotl
+              (local.get $h)
+              (i32.and (local.get $i) (i32.const 31))
+            )
+          )
+
+          ;; store back
+          (i32.store (local.get $idx) (local.get $h))
+
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $mix_loop)
+        )
+      )
+
+      (local.set $round (i32.add (local.get $round) (i32.const 1)))
+      (br $mix_rounds_loop)
+    )
+  )
+
+  ;; ---------------------------------------------------------
+  ;; 4) Avalanche (2 rounds)
+  ;;    h[i] ^= h[(i+17)&511] * C3
+  ;;    h[i] = rotl(h[i], 13)
+  ;; ---------------------------------------------------------
+  (local.set $round (i32.const 0))
+  (block $av_rounds_exit
+    (loop $av_rounds_loop
+      (br_if $av_rounds_exit
+        (i32.ge_u (local.get $round) (i32.const 2))
+      )
+
+      (local.set $i (i32.const 0))
+      (block $av_exit
+        (loop $av_loop
+          (br_if $av_exit
+            (i32.ge_u (local.get $i) (i32.const 512))
+          )
+
+          ;; idx = laneBase + i * 4
+          (local.set $idx
+            (i32.add
+              (local.get $laneBase)
+              (i32.shl (local.get $i) (i32.const 2))
+            )
+          )
+
+          ;; idxNext = laneBase + ((i+17)&511) * 4
+          (local.set $idxNext
+            (i32.add
+              (local.get $laneBase)
+              (i32.shl
+                (i32.and
+                  (i32.add (local.get $i) (i32.const 17))
+                  (i32.const 511)
+                )
+                (i32.const 2)
+              )
+            )
+          )
+
+          ;; h = load h[i]
+          (local.set $h
+            (i32.load (local.get $idx))
+          )
+
+          ;; v = h[(i+17)&511]
+          (local.set $v
+            (i32.load (local.get $idxNext))
+          )
+
+          ;; h ^= v * C3
+          (local.set $h
+            (i32.xor
+              (local.get $h)
+              (i32.mul (local.get $v) (i32.const 0x165667b1))
+            )
+          )
+
+          ;; h = rotl(h, 13)
+          (local.set $h
+            (i32.rotl (local.get $h) (i32.const 13))
+          )
+
+          ;; store back
+          (i32.store (local.get $idx) (local.get $h))
+
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $av_loop)
+        )
+      )
+
+      (local.set $round (i32.add (local.get $round) (i32.const 1)))
+      (br $av_rounds_loop)
+    )
+  )
+
+  ;; ---------------------------------------------------------
+  ;; 5) Write 512 lanes (2048 bytes) to outputBase
+  ;; ---------------------------------------------------------
+  (local.set $i (i32.const 0))
+  (block $out_exit
+    (loop $out_loop
+      (br_if $out_exit
+        (i32.ge_u (local.get $i) (i32.const 512))
+      )
+
+      ;; h = load lane i
+      (local.set $h
+        (i32.load
+          (i32.add
+            (local.get $laneBase)
+            (i32.shl (local.get $i) (i32.const 2))
           )
         )
+      )
 
-        ;; load 16 bytes
-        (local.set $b0  (i32.load8_u (local.get $i)))
-        (local.set $b1  (i32.load8_u (i32.add (local.get $i) (i32.const 1))))
-        (local.set $b2  (i32.load8_u (i32.add (local.get $i) (i32.const 2))))
-        (local.set $b3  (i32.load8_u (i32.add (local.get $i) (i32.const 3))))
-        (local.set $b4  (i32.load8_u (i32.add (local.get $i) (i32.const 4))))
-        (local.set $b5  (i32.load8_u (i32.add (local.get $i) (i32.const 5))))
-        (local.set $b6  (i32.load8_u (i32.add (local.get $i) (i32.const 6))))
-        (local.set $b7  (i32.load8_u (i32.add (local.get $i) (i32.const 7))))
-        (local.set $b8  (i32.load8_u (i32.add (local.get $i) (i32.const 8))))
-        (local.set $b9  (i32.load8_u (i32.add (local.get $i) (i32.const 9))))
-        (local.set $b10 (i32.load8_u (i32.add (local.get $i) (i32.const 10))))
-        (local.set $b11 (i32.load8_u (i32.add (local.get $i) (i32.const 11))))
-        (local.set $b12 (i32.load8_u (i32.add (local.get $i) (i32.const 12))))
-        (local.set $b13 (i32.load8_u (i32.add (local.get $i) (i32.const 13))))
-        (local.set $b14 (i32.load8_u (i32.add (local.get $i) (i32.const 14))))
-        (local.set $b15 (i32.load8_u (i32.add (local.get $i) (i32.const 15))))
+      ;; store to outBase + i*4
+      (i32.store
+        (i32.add
+          (local.get $outBase)
+          (i32.shl (local.get $i) (i32.const 2))
+        )
+        (local.get $h)
+      )
 
-        ;; per-lane mixing: (h ^ b) * C, then rotl
-        (local.set $h0  (i32.rotl (i32.mul (i32.xor (local.get $h0)  (local.get $b0))  (i32.const 0x85ebca6b)) (i32.const 1)))
-        (local.set $h1  (i32.rotl (i32.mul (i32.xor (local.get $h1)  (local.get $b1))  (i32.const 0xc2b2ae35)) (i32.const 2)))
-        (local.set $h2  (i32.rotl (i32.mul (i32.xor (local.get $h2)  (local.get $b2))  (i32.const 0x27d4eb2f)) (i32.const 3)))
-        (local.set $h3  (i32.rotl (i32.mul (i32.xor (local.get $h3)  (local.get $b3))  (i32.const 0x165667b1)) (i32.const 4)))
-        (local.set $h4  (i32.rotl (i32.mul (i32.xor (local.get $h4)  (local.get $b4))  (i32.const 0xd3a2646c)) (i32.const 5)))
-        (local.set $h5  (i32.rotl (i32.mul (i32.xor (local.get $h5)  (local.get $b5))  (i32.const 0x7f4a7c15)) (i32.const 6)))
-        (local.set $h6  (i32.rotl (i32.mul (i32.xor (local.get $h6)  (local.get $b6))  (i32.const 0xf39cc060)) (i32.const 7)))
-        (local.set $h7  (i32.rotl (i32.mul (i32.xor (local.get $h7)  (local.get $b7))  (i32.const 0x106aa070)) (i32.const 8)))
-        (local.set $h8  (i32.rotl (i32.mul (i32.xor (local.get $h8)  (local.get $b8))  (i32.const 0x1e376c08)) (i32.const 9)))
-        (local.set $h9  (i32.rotl (i32.mul (i32.xor (local.get $h9)  (local.get $b9))  (i32.const 0x2748774c)) (i32.const 10)))
-        (local.set $h10 (i32.rotl (i32.mul (i32.xor (local.get $h10) (local.get $b10)) (i32.const 0x34b0bcb5)) (i32.const 11)))
-        (local.set $h11 (i32.rotl (i32.mul (i32.xor (local.get $h11) (local.get $b11)) (i32.const 0x391c0cb3)) (i32.const 12)))
-        (local.set $h12 (i32.rotl (i32.mul (i32.xor (local.get $h12) (local.get $b12)) (i32.const 0x4ed8aa4a)) (i32.const 13)))
-        (local.set $h13 (i32.rotl (i32.mul (i32.xor (local.get $h13) (local.get $b13)) (i32.const 0x5b9cca4f)) (i32.const 14)))
-        (local.set $h14 (i32.rotl (i32.mul (i32.xor (local.get $h14) (local.get $b14)) (i32.const 0x682e6ff3)) (i32.const 15)))
-        (local.set $h15 (i32.rotl (i32.mul (i32.xor (local.get $h15) (local.get $b15)) (i32.const 0x748f82ee)) (i32.const 16)))
-
-        ;; advance
-        (local.set $i (i32.add (local.get $i) (i32.const 16)))
-        (br $loop)
-      )
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $out_loop)
     )
-
-    ;; cross-lane mixing: t[i] = rotl(h[i] ^ (h[i+1] * C), i+1)
-    (local.set $t0  (i32.rotl (i32.xor (local.get $h0)  (i32.mul (local.get $h1)  (i32.const 0x9e3779b9))) (i32.const 1)))
-    (local.set $t1  (i32.rotl (i32.xor (local.get $h1)  (i32.mul (local.get $h2)  (i32.const 0x9e3779b9))) (i32.const 2)))
-    (local.set $t2  (i32.rotl (i32.xor (local.get $h2)  (i32.mul (local.get $h3)  (i32.const 0x9e3779b9))) (i32.const 3)))
-    (local.set $t3  (i32.rotl (i32.xor (local.get $h3)  (i32.mul (local.get $h4)  (i32.const 0x9e3779b9))) (i32.const 4)))
-    (local.set $t4  (i32.rotl (i32.xor (local.get $h4)  (i32.mul (local.get $h5)  (i32.const 0x9e3779b9))) (i32.const 5)))
-    (local.set $t5  (i32.rotl (i32.xor (local.get $h5)  (i32.mul (local.get $h6)  (i32.const 0x9e3779b9))) (i32.const 6)))
-    (local.set $t6  (i32.rotl (i32.xor (local.get $h6)  (i32.mul (local.get $h7)  (i32.const 0x9e3779b9))) (i32.const 7)))
-    (local.set $t7  (i32.rotl (i32.xor (local.get $h7)  (i32.mul (local.get $h8)  (i32.const 0x9e3779b9))) (i32.const 8)))
-    (local.set $t8  (i32.rotl (i32.xor (local.get $h8)  (i32.mul (local.get $h9)  (i32.const 0x9e3779b9))) (i32.const 9)))
-    (local.set $t9  (i32.rotl (i32.xor (local.get $h9)  (i32.mul (local.get $h10) (i32.const 0x9e3779b9))) (i32.const 10)))
-    (local.set $t10 (i32.rotl (i32.xor (local.get $h10) (i32.mul (local.get $h11) (i32.const 0x9e3779b9))) (i32.const 11)))
-    (local.set $t11 (i32.rotl (i32.xor (local.get $h11) (i32.mul (local.get $h12) (i32.const 0x9e3779b9))) (i32.const 12)))
-    (local.set $t12 (i32.rotl (i32.xor (local.get $h12) (i32.mul (local.get $h13) (i32.const 0x9e3779b9))) (i32.const 13)))
-    (local.set $t13 (i32.rotl (i32.xor (local.get $h13) (i32.mul (local.get $h14) (i32.const 0x9e3779b9))) (i32.const 14)))
-    (local.set $t14 (i32.rotl (i32.xor (local.get $h14) (i32.mul (local.get $h15) (i32.const 0x9e3779b9))) (i32.const 15)))
-    (local.set $t15 (i32.rotl (i32.xor (local.get $h15) (i32.mul (local.get $h0)  (i32.const 0x9e3779b9))) (i32.const 16)))
-
-    (local.set $h0  (local.get $t0))
-    (local.set $h1  (local.get $t1))
-    (local.set $h2  (local.get $t2))
-    (local.set $h3  (local.get $t3))
-    (local.set $h4  (local.get $t4))
-    (local.set $h5  (local.get $t5))
-    (local.set $h6  (local.get $t6))
-    (local.set $h7  (local.get $t7))
-    (local.set $h8  (local.get $t8))
-    (local.set $h9  (local.get $t9))
-    (local.set $h10 (local.get $t10))
-    (local.set $h11 (local.get $t11))
-    (local.set $h12 (local.get $t12))
-    (local.set $h13 (local.get $t13))
-    (local.set $h14 (local.get $t14))
-    (local.set $h15 (local.get $t15))
-
-    ;; final avalanche per lane
-    (local.set $h0
-      (block (result i32)
-        (local.set $v (local.get $h0))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h1
-      (block (result i32)
-        (local.set $v (local.get $h1))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h2
-      (block (result i32)
-        (local.set $v (local.get $h2))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h3
-      (block (result i32)
-        (local.set $v (local.get $h3))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h4
-      (block (result i32)
-        (local.set $v (local.get $h4))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h5
-      (block (result i32)
-        (local.set $v (local.get $h5))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h6
-      (block (result i32)
-        (local.set $v (local.get $h6))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h7
-      (block (result i32)
-        (local.set $v (local.get $h7))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h8
-      (block (result i32)
-        (local.set $v (local.get $h8))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h9
-      (block (result i32)
-        (local.set $v (local.get $h9))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h10
-      (block (result i32)
-        (local.set $v (local.get $h10))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h11
-      (block (result i32)
-        (local.set $v (local.get $h11))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h12
-      (block (result i32)
-        (local.set $v (local.get $h12))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h13
-      (block (result i32)
-        (local.set $v (local.get $h13))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h14
-      (block (result i32)
-        (local.set $v (local.get $h14))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-    (local.set $h15
-      (block (result i32)
-        (local.set $v (local.get $h15))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x2c1b3c6d)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 12))))
-        (local.set $v (i32.mul (local.get $v) (i32.const 0x297a2d39)))
-        (local.set $v (i32.xor (local.get $v) (i32.shr_u (local.get $v) (i32.const 15))))
-        (local.get $v)
-      )
-    )
-
-    ;; store 16 x i32 at offset 0
-    (i32.store (i32.const 0)  (local.get $h0))
-    (i32.store (i32.const 4)  (local.get $h1))
-    (i32.store (i32.const 8)  (local.get $h2))
-    (i32.store (i32.const 12) (local.get $h3))
-    (i32.store (i32.const 16) (local.get $h4))
-    (i32.store (i32.const 20) (local.get $h5))
-    (i32.store (i32.const 24) (local.get $h6))
-    (i32.store (i32.const 28) (local.get $h7))
-    (i32.store (i32.const 32) (local.get $h8))
-    (i32.store (i32.const 36) (local.get $h9))
-    (i32.store (i32.const 40) (local.get $h10))
-    (i32.store (i32.const 44) (local.get $h11))
-    (i32.store (i32.const 48) (local.get $h12))
-    (i32.store (i32.const 52) (local.get $h13))
-    (i32.store (i32.const 56) (local.get $h14))
-    (i32.store (i32.const 60) (local.get $h15))
   )
 )
