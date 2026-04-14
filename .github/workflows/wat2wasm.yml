@@ -21,7 +21,7 @@ jobs:
 
       - name: Compile WAT to WASM
         # Assumes your file is named memory.wat
-        run: wat2wasm memory.wat -o memory.wasm
+        run: wat2wasm memory.wat --enable-memory64 -o memory.wasm
 
       - name: Upload WASM Artifact
         uses: actions/upload-artifact@v4
